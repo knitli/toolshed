@@ -175,6 +175,30 @@ class StockCodexProbeTests(unittest.TestCase):
         self.assertEqual(classification["classifiedFollowupNumbers"], [5])
         self.assertFalse(classification["noClassifiedFollowupBeforeRelease"])
 
+    def test_background_title_generation_chaining_is_not_a_queued_followup(self):
+        requests = [
+            {"number": 3, "synthetic_user_text": [HELD_PROMPT],
+             "structure": {"previousResponseIdPresent": False},
+             "purposeClassification": "unclassified_user_request"},
+            {"number": 4, "synthetic_user_text": [],
+             "structure": {"previousResponseIdPresent": True},
+             "purposeClassification": "background_title_generation"},
+        ]
+
+        classification = _classify_held_window(requests, 3, QUEUE_REFERENCE)
+
+        self.assertEqual(classification["classifiedFollowupNumbers"], [])
+        self.assertEqual(classification["backgroundTitleGenerationNumbers"], [4])
+        self.assertEqual(classification["unknownRequestNumbers"], [])
+        self.assertTrue(classification["noClassifiedFollowupBeforeRelease"])
+
+        requests.append({"number": 5, "synthetic_user_text": [QUEUE_REFERENCE],
+                         "structure": {"previousResponseIdPresent": True},
+                         "purposeClassification": "queued_followup"})
+        with_queued_followup = _classify_held_window(requests, 3, QUEUE_REFERENCE)
+        self.assertEqual(with_queued_followup["classifiedFollowupNumbers"], [5])
+        self.assertFalse(with_queued_followup["noClassifiedFollowupBeforeRelease"])
+
     def test_client_view_checks_response_and_queued_reference_display_order(self):
         response_first = f"{HELD_PROMPT} Working {HELD_REPLY} {QUEUE_REFERENCE}"
         reference_first = f"{HELD_PROMPT} Working {QUEUE_REFERENCE} {HELD_REPLY}"

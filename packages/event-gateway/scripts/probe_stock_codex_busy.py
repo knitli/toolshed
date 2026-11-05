@@ -245,7 +245,8 @@ def _classify_held_window(requests, held_number, reference):
     later = [row for row in requests if row["number"] > held_number]
     known = [row["number"] for row in later
              if reference in row["synthetic_user_text"]
-             or row["structure"]["previousResponseIdPresent"]]
+             or (row["structure"]["previousResponseIdPresent"]
+                 and row.get("purposeClassification") != "background_title_generation")]
     background = [row["number"] for row in later
                   if row.get("purposeClassification") == "background_title_generation"]
     unknown = [row["number"] for row in later if row["number"] not in known
