@@ -1,6 +1,7 @@
 """Private, single-writer durable delivery ledger."""
 
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -128,6 +129,8 @@ class Store:
         for column in ("input_recorded_receipt", "native_observed_ack"):
             if column not in columns:
                 self.db.execute(f"ALTER TABLE attempts ADD COLUMN {column} TEXT")
+        if "operator_disposition" not in columns:
+            self.db.execute("ALTER TABLE attempts ADD COLUMN operator_disposition TEXT")
 
     def _initialize_schema(self):
         """Create tables, migrate columns, and mark interrupted submits ambiguous."""
@@ -686,6 +689,144 @@ class Store:
                     "input_recorded_receipt", "native_observed_ack"):
             result[key] = json.loads(result[key]) if result[key] is not None else None
         return result
+
+    @staticmethod
+    def _stock_recovery_identity(envelope, admission):
+        """Hash exact delivery, stock conversation, and all destination generations."""
+        from .cloud import _generation, _safe_uint, _uuid
+        from .protocol import ProtocolError, validate_runtime_profile
+
+        profile = envelope.get("runtimeProfile")
+        admitted = admission.get("envelope") if isinstance(admission, dict) else None
+        required = ("deliveryId", "attemptId", *IDENTITY, "consumerGeneration", "runtimeProfile")
+        if (not _safe_uint(envelope.get("schemaVersion")) or envelope["schemaVersion"] != 1
+                or any(key not in envelope for key in required)
+                or not isinstance(admitted, dict)):
+            return None
+        try:
+            profile = validate_runtime_profile(profile)
+        except ProtocolError:
+            return None
+        messaging_keys = ("routingGeneration", "namespace", "agentIncarnation")
+        messaging_present = tuple(key in envelope for key in messaging_keys)
+        if (not isinstance(envelope.get("deliveryId"), str)
+                or not re.fullmatch(r"dly_[a-f0-9]{64}", envelope["deliveryId"])
+                or not _uuid(envelope.get("attemptId"))
+                or not _uuid(envelope.get("runtimeId"))
+                or any(not isinstance(envelope.get(key), str) or not 1 <= len(envelope[key]) <= 256
+                       for key in ("principal", "agent"))
+                or any(not _generation(envelope.get(key)) for key in (
+                    "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration"))
+                or (any(messaging_present) and not all(messaging_present))
+                or (all(messaging_present)
+                    and (not _generation(envelope["routingGeneration"])
+                         or not _safe_uint(envelope.get("agentIncarnation"))
+                         or not isinstance(envelope.get("namespace"), str)
+                         or not 1 <= len(envelope["namespace"]) <= 256
+                         or re.search(r"[\x00-\x1f\x7f]", envelope["namespace"])))):
+            return None
+        keys = ("deliveryId", "attemptId", *IDENTITY, "consumerGeneration",
+                "routingGeneration", "namespace", "agentIncarnation", "runtimeProfile")
+        identity = {key: envelope[key] for key in keys if key in envelope}
+        if any(envelope.get(key) != admitted.get(key) for key in identity):
+            return None
+        if not _uuid(admission.get("nodeId")):
+            return None
+        identity["nodeId"] = admission["nodeId"]
+        return identity, hashlib.sha256(_json(identity).encode()).hexdigest()
+
+    def list_stock_recovery(self, limit=100, delivery_id=None):
+        """Return a bounded, content-free view of unresolved stock input attempts."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise StoreError("invalid_limit")
+        if delivery_id is not None and (
+                not isinstance(delivery_id, str)
+                or not re.fullmatch(r"dly_[a-f0-9]{64}", delivery_id)):
+            raise StoreError("invalid_delivery_id")
+        params = ["ambiguous", "ambiguous", "assigned_stock_client"]
+        if delivery_id is None:
+            query = (
+                "SELECT a.* FROM deliveries d JOIN attempts a ON a.delivery_id=d.id "
+                "WHERE d.state=? AND a.state=? "
+                "AND json_extract(a.envelope,'$.runtimeProfile.profile')=? "
+                "ORDER BY d.updated,d.id LIMIT ?"
+            )
+        else:
+            query = (
+                "SELECT a.* FROM deliveries d JOIN attempts a ON a.delivery_id=d.id "
+                "WHERE d.state=? AND a.state=? "
+                "AND json_extract(a.envelope,'$.runtimeProfile.profile')=? AND d.id=? "
+                "ORDER BY d.updated,d.id LIMIT ?"
+            )
+            params.append(delivery_id)
+        params.append(limit + 1)
+        rows = self.db.execute(
+            query, params,
+        ).fetchall()
+        summaries = []
+        for row in rows[:limit]:
+            envelope = json.loads(row["envelope"])
+            identity = self._stock_recovery_identity(envelope, json.loads(row["admission"] or "null"))
+            if identity is None:
+                continue
+            exact, digest = identity
+            summaries.append({
+                "deliveryId": exact["deliveryId"], "attemptId": exact["attemptId"],
+                "runtimeId": exact["runtimeId"],
+                "conversationId": exact["runtimeProfile"]["conversationId"],
+                "runtimeGeneration": exact["runtimeGeneration"],
+                "attachmentGeneration": exact["attachmentGeneration"],
+                "expectedIdentitySha256": digest, "machineState": "unknown",
+                "operatorDisposition": (json.loads(row["operator_disposition"])
+                                         if row["operator_disposition"] else None),
+                "cloudObligation": "unresolved",
+            })
+        truncated = len(rows) > limit
+        result = {"deliveries": summaries, "truncated": truncated}
+        while summaries and len(json.dumps(result).encode()) > 7600:
+            summaries.pop()
+            result["truncated"] = truncated = True
+        return result
+
+    def abandon_stock_delivery(self, delivery_id, attempt_id, expected_identity_sha256):
+        """Record local abandonment without settling or changing the uncertain attempt."""
+        if (not isinstance(expected_identity_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_identity_sha256)):
+            raise StoreError("invalid_recovery_identity")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            attempt = self._attempt(delivery_id, attempt_id)
+            if delivery is None or attempt is None:
+                raise StoreError("not_found")
+            envelope = json.loads(delivery["envelope"])
+            identity = self._stock_recovery_identity(envelope, json.loads(attempt["admission"] or "null"))
+            if identity is None:
+                raise StoreError("not_stock_delivery")
+            _, digest = identity
+            if digest != expected_identity_sha256:
+                raise StoreError("stale_recovery_identity")
+            if delivery["state"] != "ambiguous" or attempt["state"] != "ambiguous":
+                raise StoreError("not_ambiguous")
+            record = {
+                "action": "abandoned", "identitySha256": digest,
+                "recordedAt": self.clock(), "machineState": "unknown",
+                "cloudObligation": "unresolved",
+            }
+            encoded = _json(record)
+            if len(encoded.encode()) > 512:
+                raise StoreError("recovery_record_too_large")
+            if attempt["operator_disposition"] is not None:
+                previous = json.loads(attempt["operator_disposition"])
+                if previous.get("identitySha256") != digest or previous.get("action") != "abandoned":
+                    raise StoreError("operator_disposition_conflict")
+                return previous
+            self._capacity(1024)
+            self.db.execute(
+                "UPDATE attempts SET operator_disposition=? WHERE delivery_id=? AND attempt_id=?",
+                (encoded, delivery_id, attempt_id),
+            )
+        return record
 
     def _spend(self, row, size=0):
         cost = 32768 + size * 6

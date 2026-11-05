@@ -76,6 +76,7 @@ class CliTests(unittest.TestCase):
         commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
         self.assertEqual(set(commands.choices), {
             "status", "enroll", "run", "runtime-status", "stock-control",
+            "stock-recovery",
             "github-event-read", "github-source-read", "github-source-material", "detach",
         })
         output = io.StringIO()
@@ -96,7 +97,7 @@ class CliTests(unittest.TestCase):
         commands = (
             "run", "launch", "client-status", "attach", "renew", "transfer",
             "runtime-status", "stock-control", "github-event-read", "github-source-read",
-            "github-source-material", "reconcile", "detach",
+            "github-source-material", "reconcile", "stock-recovery", "detach",
         )
         arguments = {
             "launch": ["--codex-binary", "/unused", "--binary-sha256", "unused", "--cwd", "/unused"],
@@ -110,6 +111,7 @@ class CliTests(unittest.TestCase):
                          "--session-id", "session", "--cloud-config", "config"],
             "runtime-status": ["--runtime-id", "runtime", "--cloud-config", "config"],
             "stock-control": ["attach", "--runtime-id", "runtime", "--conversation-id", "conversation", "--cloud-config", "config"],
+            "stock-recovery": ["list"],
             "github-event-read": ["--cloud-config", "config", "--event-reference", "reference"],
             "github-source-read": ["--cloud-config", "config", "--installation-id", "1", "--repository-id", "1",
                                    "--pr-number", "1", "--from-version", "1", "--to-version", "1"],
