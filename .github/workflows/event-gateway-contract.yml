@@ -239,6 +239,14 @@ jobs:
               'messaging-v2/source-receipt.json': 'ec07eabf0dbeecfeb1170e48f435b4ffdcbb0554516aff24153f0d276572ad7d',
               'messaging-v2/wire-source-receipt.json': '146dc8c15c41d1c4da9a59537cf693d6a3a6dcad30dc2e7d94f9d129a5bc3e88',
             }},
+            {'name': 'active-assigned-stock-v2',
+             'adoption': 'active',
+             'hashes': {
+               'messaging-v2/messaging-protocol-semantics-v2.json': '0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f',
+               'messaging-v2/messaging-v2-wire.json': 'a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032',
+               'messaging-v2/source-receipt.json': '6a972450486b48eccdfc8a82f077139689bf5b3b5990c4a3ca7836c247f922df',
+               'messaging-v2/wire-source-receipt.json': '4fd527d2d963d07a01c9b2d8491bee4813ad4f826eb4537698aba6ea6c1e58e2',
+             }},
           )
 
 
@@ -406,6 +414,9 @@ jobs:
                           if adoption == "dormant":
                               v2_state = "success"
                               v2_description = "Dormant Messaging v2 provenance verified; not adopted"
+                          elif adoption == "active":
+                              v2_state = "success"
+                              v2_description = "Active trusted Messaging v2 profile verified: " + profile
                           else:
                               v2_state = "success"
                               v2_description = "Trusted Messaging v2 profile verified: " + profile

@@ -38,6 +38,30 @@ MESSAGING_V2_ADOPTION_FIXTURE = {
     "adoption": "trusted",
     "hashes": {path: "0" * 64 for path in MESSAGING_V2_PATHS},
 }
+ACTIVE_V2_NAME = "active-assigned-stock-v2"
+ACTIVE_V2_SOURCE_SHA = "e954904603b3467e30bbeaf7446977b61fbcb9ef"
+ACTIVE_V2_SOURCE_TREE = "f47bb9345aa17f9b504965bd5c319163b569c9df"
+ACTIVE_V2_ARCHIVE = "tests/fixtures/messaging-v2-active-assigned-stock.zip"
+ACTIVE_V2_ARCHIVE_SHA256 = "adc3842002feb70851031312e85571866e216b25342382a99365c29d099b395c"
+ACTIVE_V2_HASHES = {
+    "messaging-v2/messaging-protocol-semantics-v2.json": "0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f",
+    "messaging-v2/messaging-v2-wire.json": "a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032",
+    "messaging-v2/source-receipt.json": "6a972450486b48eccdfc8a82f077139689bf5b3b5990c4a3ca7836c247f922df",
+    "messaging-v2/wire-source-receipt.json": "4fd527d2d963d07a01c9b2d8491bee4813ad4f826eb4537698aba6ea6c1e58e2",
+}
+ACTIVE_V2_SOURCE_HASHES = {
+    "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts": "3f91122c7bd2d78d072ad51a9fb2fef4adfb99e3277bf4052196a54a74238193",
+    "apps/os/packages/event-runtime/src/protocol.ts": "b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d",
+    "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": ACTIVE_V2_HASHES["messaging-v2/messaging-protocol-semantics-v2.json"],
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json": ACTIVE_V2_HASHES["messaging-v2/messaging-v2-wire.json"],
+    "apps/os/pnpm-lock.yaml": "62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549",
+}
+ACTIVE_V2_SCHEMA_HASHES = {
+    "package.json": "a046ed85fa09571dba539fee9ef236152d12dabd1f229b014ec3bd2ebaad9000",
+    "v4/core/checks.js": "bc42543274218aa7ef72192b3218d2a4a399e53df8de240a04d9ff275096f563",
+    "v4/core/util.js": "728f52b496620336775eafcdb91c0a574380086e53f215b55c58eedc1422c49c",
+}
 STOCK_NAME = 'assigned-stock-github-delivery'
 STOCK_REVISION = '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa'
 STOCK_ARCHIVE = 'tests/fixtures/assigned-stock-contract-family.zip'
@@ -121,12 +145,101 @@ class ContractWorkflowTests(unittest.TestCase):
         with patch.dict(POLICY, replacements):
             return POLICY["verify_messaging_v2_contract"](head, "test-token")
 
+    def active_contract_blobs(self):
+        with zipfile.ZipFile(PACKAGE / ACTIVE_V2_ARCHIVE) as archive:
+            return {SNAPSHOT + path: archive.read(f"snapshots/{ACTIVE_V2_NAME}/{path}")
+                    for path in MESSAGING_V2_PATHS}
+
     def test_dormant_messaging_v2_profile_is_provenance_only(self):
         self.assertEqual(self.verify_messaging_v2(),
                          ("dormant-source-conformance", "dormant"))
         receipt = json.loads(self.messaging_v2[SNAPSHOT + MESSAGING_V2_PATHS[2]])
         self.assertFalse(receipt["trustedPolicyAdoption"])
         self.assertCountEqual(self.reads, [SNAPSHOT + path for path in MESSAGING_V2_PATHS])
+
+    def test_active_messaging_v2_archive_pins_exact_merged_source_and_schema(self):
+        archive_path = PACKAGE / ACTIVE_V2_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(), ACTIVE_V2_ARCHIVE_SHA256)
+        with zipfile.ZipFile(archive_path) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            expected_members = {"metadata.json"}
+            expected_members.update(f"snapshots/{ACTIVE_V2_NAME}/{path}" for path in MESSAGING_V2_PATHS)
+            expected_members.update(f"sources/{ACTIVE_V2_SOURCE_SHA}/{path}" for path in ACTIVE_V2_SOURCE_HASHES)
+            expected_members.update(f"dependencies/zod@4.6.5/{path}" for path in ACTIVE_V2_SCHEMA_HASHES)
+            self.assertEqual(len(archive.namelist()), len(set(archive.namelist())))
+            self.assertEqual(set(archive.namelist()), expected_members)
+            self.assertEqual(metadata["profile"], ACTIVE_V2_NAME)
+            self.assertEqual(metadata["adoption"], "active")
+            self.assertEqual(metadata["sourceCommit"], ACTIVE_V2_SOURCE_SHA)
+            self.assertEqual(metadata["sourceTree"], ACTIVE_V2_SOURCE_TREE)
+            self.assertEqual(metadata["contractHashes"], ACTIVE_V2_HASHES)
+            self.assertEqual({entry["path"]: entry["sha256"] for entry in metadata["sourceFiles"]},
+                             ACTIVE_V2_SOURCE_HASHES)
+            for path, digest in ACTIVE_V2_SOURCE_HASHES.items():
+                archived = archive.read(f"sources/{ACTIVE_V2_SOURCE_SHA}/{path}")
+                self.assertEqual(hashlib.sha256(archived).hexdigest(), digest)
+            schema = metadata["schemaDependency"]
+            self.assertEqual((schema["package"], schema["version"]), ("zod", "4.6.5"))
+            self.assertEqual({entry["path"]: entry["sha256"] for entry in schema["files"]},
+                             ACTIVE_V2_SCHEMA_HASHES)
+            for path, digest in ACTIVE_V2_SCHEMA_HASHES.items():
+                archived = archive.read(f"dependencies/zod@4.6.5/{path}")
+                self.assertEqual(hashlib.sha256(archived).hexdigest(), digest)
+            self.assertEqual(json.loads(archive.read("dependencies/zod@4.6.5/package.json"))["version"], "4.6.5")
+            for contract_path in MESSAGING_V2_PATHS:
+                blob = archive.read(f"snapshots/{ACTIVE_V2_NAME}/{contract_path}")
+                self.assertEqual(hashlib.sha256(blob).hexdigest(), ACTIVE_V2_HASHES[contract_path])
+            for receipt_path, fixture_path, fixture_hash in (
+                (MESSAGING_V2_PATHS[2], "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json", ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[0]]),
+                (MESSAGING_V2_PATHS[3], "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json", ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[1]]),
+            ):
+                receipt = json.loads(archive.read(f"snapshots/{ACTIVE_V2_NAME}/{receipt_path}"))
+                self.assertEqual(receipt["purpose"], "active_assigned_stock_v2_policy_adoption")
+                self.assertTrue(receipt["trustedPolicyAdoption"])
+                self.assertEqual(receipt["sourceCommit"], ACTIVE_V2_SOURCE_SHA)
+                self.assertEqual(receipt["sourceTree"], ACTIVE_V2_SOURCE_TREE)
+                self.assertEqual({entry["path"]: entry["sha256"] for entry in receipt["sourceFiles"]},
+                                 ACTIVE_V2_SOURCE_HASHES)
+                self.assertEqual(receipt["schemaDependency"], schema)
+                self.assertEqual(receipt["fixture"]["sha256"], fixture_hash)
+                self.assertEqual(receipt["fixture"]["file"], fixture_path)
+
+        profiles = POLICY["MESSAGING_V2_PROFILES"]
+        dormant = next(profile for profile in profiles if profile["name"] == "dormant-source-conformance")
+        active = next(profile for profile in profiles if profile["name"] == ACTIVE_V2_NAME)
+        self.assertEqual(dormant["adoption"], "dormant")
+        self.assertEqual(dormant["hashes"], {
+            "messaging-v2/messaging-protocol-semantics-v2.json": "74c37fe03b019c153a4ac81c11253618a1444eea63d794d70e9899699e2f786d",
+            "messaging-v2/messaging-v2-wire.json": "9b5c4030c7059f68c55d1e0a2dad51eb276ed585b8dac18b437ff9ae97900129",
+            "messaging-v2/source-receipt.json": "ec07eabf0dbeecfeb1170e48f435b4ffdcbb0554516aff24153f0d276572ad7d",
+            "messaging-v2/wire-source-receipt.json": "146dc8c15c41d1c4da9a59537cf693d6a3a6dcad30dc2e7d94f9d129a5bc3e88",
+        })
+        self.assertEqual((active["adoption"], active["hashes"]), ("active", ACTIVE_V2_HASHES))
+        self.blobs.update(self.active_contract_blobs())
+        self.assertEqual(self.verify_messaging_v2(), (ACTIVE_V2_NAME, "active"))
+
+    def test_active_messaging_v2_profile_rejects_each_single_blob_mutation(self):
+        active = next(profile for profile in POLICY["MESSAGING_V2_PROFILES"]
+                      if profile["name"] == ACTIVE_V2_NAME)
+        for path in MESSAGING_V2_PATHS:
+            with self.subTest(path=path):
+                self.blobs = self.active_contract_blobs()
+                self.blobs[SNAPSHOT + path] += b"mutation"
+                with self.assertRaisesRegex(ValueError, "Messaging v2 contract profile not authorized"):
+                    self.verify_messaging_v2((active,))
+
+    def test_active_messaging_v2_profile_publishes_distinct_status(self):
+        self.blobs.update(self.active_contract_blobs())
+        results, posts, _ = self.refresh()
+        self.assertEqual(results, [(1, HEAD, "success", "success")])
+        v2_posts = [payload for _, payload in posts
+                    if payload["context"] == "Event Gateway / Messaging v2 contract"]
+        self.assertEqual([(payload["state"], payload["description"]) for payload in v2_posts], [
+            ("pending", "Checking exact Messaging v2 contract profile"),
+            ("success", "Active trusted Messaging v2 profile verified: " + ACTIVE_V2_NAME),
+        ])
+        self.assertEqual(sum(payload["state"] == "success" for _, payload in posts
+                             if payload["context"] == "Event Gateway / trusted contract"), 1)
 
     def test_messaging_v2_profile_fixture_is_test_only_and_exact(self):
         profile = dict(MESSAGING_V2_ADOPTION_FIXTURE, hashes={
