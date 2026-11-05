@@ -26,10 +26,35 @@ from scripts.probe_stock_codex_busy import (
     _reap_tui,
     _request_structure,
     _valid_followup,
+    _session_stayed_idle,
 )
 
 
 class StockCodexProbeTests(unittest.TestCase):
+    @staticmethod
+    def _passing_busy_result():
+        return {
+            "queueExit": 0,
+            "queueTargetsExactThreadA": True,
+            "queueAcceptedWhileHeld": True,
+            "noClassifiedFollowupBeforeRelease": True,
+            "heldWindowClassification": {
+                "backgroundTitleGenerationNumbers": [4], "unknownRequestNumbers": [],
+            },
+            "noProviderWriteErrorBeforeRelease": True,
+            "heldResponseWrittenBeforeFollowupRequest": True,
+            "followupIncludesHeldAssistantResponse": True,
+            "clientStateBeforeFollowupCompletion": {
+                "workingVisible": True, "heldAssistantResponseVisible": True,
+                "explicitCancellationSignalVisible": False, "queuedReferenceVisible": False,
+            },
+            "BStayedIdle": True,
+            "BStillOpenWhileHeld": True,
+            "TuiAStillRunningWhileHeld": True,
+            "TuiAStillRunningAfterFollowup": True,
+            "followupResponseWritten": True,
+        }
+
     def test_request_context_rejects_other_or_mixed_session_history(self):
         reference = "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         session_a = "Seed synthetic session A."
@@ -309,33 +334,33 @@ class StockCodexProbeTests(unittest.TestCase):
             self.assertIn('"cleanupOk": false', stdout.getvalue())
 
     def test_busy_gate_requires_held_response_then_exact_followup_but_not_visible_ref(self):
-        result = {
-            "queueExit": 0,
-            "queueTargetsExactThreadA": True,
-            "queueAcceptedWhileHeld": True,
-            "noClassifiedFollowupBeforeRelease": True,
-            "heldWindowClassification": {
-                "backgroundTitleGenerationNumbers": [4], "unknownRequestNumbers": [],
-            },
-            "noProviderWriteErrorBeforeRelease": True,
-            "heldResponseWrittenBeforeFollowupRequest": True,
-            "followupIncludesHeldAssistantResponse": True,
-            "clientStateBeforeFollowupCompletion": {
-                "workingVisible": True, "heldAssistantResponseVisible": True,
-                "explicitCancellationSignalVisible": False, "queuedReferenceVisible": False,
-            },
-            "BStayedIdle": True,
-            "BStillOpenWhileHeld": True,
-            "TuiAStillRunningWhileHeld": True,
-            "TuiAStillRunningAfterFollowup": True,
-            "followupResponseWritten": True,
-        }
+        result = self._passing_busy_result()
 
         self.assertTrue(_busy_gate_passed(result))
         result["heldWindowClassification"]["unknownRequestNumbers"] = [4]
         self.assertFalse(_busy_gate_passed(result))
         result["heldWindowClassification"]["unknownRequestNumbers"] = []
         result["heldResponseWrittenBeforeFollowupRequest"] = False
+        self.assertFalse(_busy_gate_passed(result))
+
+    def test_late_second_session_request_fails_final_idle_qualification(self):
+        requests = [
+            {"number": 1, "synthetic_user_text": ["Seed synthetic session B."]},
+            {"number": 2, "synthetic_user_text": ["Seed synthetic session A."]},
+            {"number": 3, "synthetic_user_text": ["Seed synthetic session A.", HELD_PROMPT]},
+        ]
+        baseline = 1
+        result = self._passing_busy_result()
+        idle = _session_stayed_idle(requests, baseline, "Seed synthetic session B.")
+        result["BStayedIdle"] = idle
+        self.assertTrue(idle)
+        self.assertTrue(_busy_gate_passed(result))
+
+        requests.append({"number": 4, "synthetic_user_text": ["Seed synthetic session B."]})
+
+        idle = _session_stayed_idle(requests, baseline, "Seed synthetic session B.")
+        result["BStayedIdle"] = idle
+        self.assertFalse(idle)
         self.assertFalse(_busy_gate_passed(result))
 
 

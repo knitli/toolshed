@@ -258,6 +258,10 @@ def _classify_held_window(requests, held_number, reference):
     }
 
 
+def _session_stayed_idle(requests, baseline, marker):
+    return not any(marker in row["synthetic_user_text"] for row in requests[baseline:])
+
+
 def _busy_gate_passed(result):
     client = result.get("clientStateBeforeFollowupCompletion", {})
     return bool(
@@ -424,6 +428,7 @@ def qualify(binary, private_request_capture=None):
         daemon_stop_required = False
         tuis = []
         drains = []
+        b_request_baseline = None
         try:
             version = subprocess.run(
                 [str(binary), "--version"], env=_environment(home), text=True,
@@ -511,9 +516,6 @@ def qualify(binary, private_request_capture=None):
                     "heldWindowClassification"]["noClassifiedFollowupBeforeRelease"]
                 result["noProviderWriteErrorBeforeRelease"] = not provider.response_write_errors
                 result["clientStateAtQueueAcceptance"] = _client_view(typed + drain_a.snapshot())
-                result["BStayedIdle"] = not any(
-                    SESSION_B in row["synthetic_user_text"]
-                    for row in provider.requests[b_request_baseline:])
             result["BStillOpenWhileHeld"] = tui_b.poll() is None
             result["TuiAStillRunningWhileHeld"] = tui_a.poll() is None
             with provider.lock:
@@ -539,16 +541,11 @@ def qualify(binary, private_request_capture=None):
             result["TuiAStillRunningAfterFollowup"] = tui_a.poll() is None
             result["orderedTuiExcerpt"] = _wait_for_ordered_excerpt(drain_a, typed)
             with provider.lock:
+                final_requests = list(provider.requests)
                 result["events"] = list(provider.events)
                 result["providerWriteErrors"] = list(provider.response_write_errors)
-                result["providerRequestSummary"] = [
-                    {"number": row["number"],
-                     "syntheticUserMarkers": row["synthetic_user_text"],
-                     "heldAssistantMarker": row["heldAssistantMarker"],
-                     "structure": row["structure"],
-                     "purposeClassification": row["purposeClassification"],
-                     "elapsedSeconds": row["elapsedSeconds"]}
-                    for row in provider.requests]
+                result["BStayedIdle"] = _session_stayed_idle(
+                    final_requests, b_request_baseline, SESSION_B)
             event_names = [(event["event"], event.get("number")) for event in result["events"]]
             held_write = event_names.index(("response_written", held_number)) if ("response_written", held_number) in event_names else -1
             followup_number = followup["number"] if followup else -1
@@ -607,19 +604,24 @@ def qualify(binary, private_request_capture=None):
                     result["result"] = "bounded_synthetic_busy_failed"
                     result["error"] = "daemon_cleanup_failed"
             with provider.lock:
-                if "events" not in result:
-                    result["events"] = list(provider.events)
-                if "providerWriteErrors" not in result:
-                    result["providerWriteErrors"] = list(provider.response_write_errors)
-                if "providerRequestSummary" not in result:
-                    result["providerRequestSummary"] = [
-                        {"number": row["number"],
-                         "syntheticUserMarkers": row["synthetic_user_text"],
-                         "heldAssistantMarker": row["heldAssistantMarker"],
-                         "structure": row["structure"],
-                         "purposeClassification": row["purposeClassification"],
-                         "elapsedSeconds": row["elapsedSeconds"]}
-                        for row in provider.requests]
+                final_requests = list(provider.requests)
+                if b_request_baseline is not None:
+                    result["BStayedIdle"] = _session_stayed_idle(
+                        final_requests, b_request_baseline, SESSION_B)
+                result["events"] = list(provider.events)
+                result["providerWriteErrors"] = list(provider.response_write_errors)
+                result["providerRequestSummary"] = [
+                    {"number": row["number"],
+                     "syntheticUserMarkers": row["synthetic_user_text"],
+                     "heldAssistantMarker": row["heldAssistantMarker"],
+                     "structure": row["structure"],
+                     "purposeClassification": row["purposeClassification"],
+                     "elapsedSeconds": row["elapsedSeconds"]}
+                    for row in final_requests]
+            if result.get("passed") and not result.get("BStayedIdle"):
+                result["passed"] = False
+                result["result"] = "bounded_synthetic_busy_failed"
+                result["error"] = "session_b_activity_observed"
             provider.shutdown()
             provider.server_close()
     return result
