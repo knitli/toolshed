@@ -223,6 +223,24 @@ jobs:
                        'event-control-v1/manifest.json': '84a90e9ff7b2b6586bf73cc4c23419044d32fb5751201a2baaf65c5cc2eb4bfa'}}
           )
 
+          MESSAGING_V2_PATHS = (
+              'messaging-v2/messaging-protocol-semantics-v2.json',
+              'messaging-v2/messaging-v2-wire.json',
+              'messaging-v2/source-receipt.json',
+              'messaging-v2/wire-source-receipt.json',
+          )
+          # This exact existing receipt pair is provenance-only. It is explicitly
+          # not an adoption of a trusted Messaging v2 runtime profile.
+          MESSAGING_V2_PROFILES = ({'name': 'dormant-source-conformance',
+            'adoption': 'dormant',
+            'hashes': {
+              'messaging-v2/messaging-protocol-semantics-v2.json': '74c37fe03b019c153a4ac81c11253618a1444eea63d794d70e9899699e2f786d',
+              'messaging-v2/messaging-v2-wire.json': '9b5c4030c7059f68c55d1e0a2dad51eb276ed585b8dac18b437ff9ae97900129',
+              'messaging-v2/source-receipt.json': 'ec07eabf0dbeecfeb1170e48f435b4ffdcbb0554516aff24153f0d276572ad7d',
+              'messaging-v2/wire-source-receipt.json': '146dc8c15c41d1c4da9a59537cf693d6a3a6dcad30dc2e7d94f9d129a5bc3e88',
+            }},
+          )
+
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -239,13 +257,17 @@ jobs:
               return blob
 
 
-          def verify_contract(head, token):
+          def candidate_entries(head, token):
               if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
                   raise ValueError("invalid head")
               tree = request_json(f"git/trees/{head}?recursive=1", token)
               if tree.get("truncated") is not False:
                   raise ValueError("incomplete candidate tree")
-              entries = {entry["path"]: entry for entry in tree["tree"]}
+              return {entry["path"]: entry for entry in tree["tree"]}
+
+
+          def verify_contract(head, token, entries=None):
+              entries = candidate_entries(head, token) if entries is None else entries
               for path in PATHS:
                   entry = entries.get(SNAPSHOT + path, {})
                   if entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755"):
@@ -259,8 +281,26 @@ jobs:
                       return family["name"]
               raise ValueError("contract family not authorized")
 
+
+          def verify_messaging_v2_contract(head, token, entries=None):
+              """Verify exact V2 contract/receipt blobs; never execute candidate content."""
+              entries = candidate_entries(head, token) if entries is None else entries
+              for path in MESSAGING_V2_PATHS:
+                  entry = entries.get(SNAPSHOT + path, {})
+                  if entry.get("type") != "blob" or entry.get("mode") not in ("100644", "100755"):
+                      raise ValueError("Messaging v2 contract path is not a regular Git blob")
+              hashes = {
+                  path: hashlib.sha256(read_blob(SNAPSHOT + path, head, token)).hexdigest()
+                  for path in MESSAGING_V2_PATHS
+              }
+              for profile in MESSAGING_V2_PROFILES:
+                  if hashes == profile["hashes"]:
+                      return profile["name"], profile["adoption"]
+              raise ValueError("Messaging v2 contract profile not authorized")
+
           WORKFLOW_PATH = ".github/workflows/event-gateway-contract.yml"
           STATUS_CONTEXT = "Event Gateway / trusted contract"
+          MESSAGING_V2_STATUS_CONTEXT = "Event Gateway / Messaging v2 contract"
 
 
           def request_json(endpoint, token, payload=None):
@@ -313,7 +353,8 @@ jobs:
               raise ValueError("unsupported trusted event")
 
 
-          def publish_if_current(number, head, state, description, token, run_url, workflow_source):
+          def publish_if_current(number, head, state, description, token, run_url, workflow_source,
+                                 context=STATUS_CONTEXT):
               if type(number) is not int or number < 1 or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
                   raise ValueError("invalid candidate")
               pull = request_json(f"pulls/{number}", token)
@@ -326,7 +367,7 @@ jobs:
               if read_blob(WORKFLOW_PATH, main_sha, token) != workflow_source:
                   return False
               request_json(f"statuses/{head}", token, {
-                  "state": state, "context": STATUS_CONTEXT, "description": description,
+                  "state": state, "context": context, "description": description,
                   "target_url": run_url})
               return True
 
@@ -343,16 +384,41 @@ jobs:
                       if not publish_if_current(number, head, "pending", "Checking complete canonical contract family",
                                                 token, run_url, workflow_source):
                           continue
+                      if not publish_if_current(number, head, "pending", "Checking exact Messaging v2 contract profile",
+                                                token, run_url, workflow_source, MESSAGING_V2_STATUS_CONTEXT):
+                          continue
                       try:
-                          family = verify_contract(head, token)
+                          entries = candidate_entries(head, token)
+                          family = verify_contract(head, token, entries)
                           state, description = "success", "Canonical event/control family verified: " + family
                       except OSError:
+                          entries = None
                           state, description = "error", "Canonical contract could not be fetched; retry verification"
                       except (ValueError, KeyError, TypeError):
+                          entries = None
                           state, description = "failure", "Snapshot does not match a contract family authorized on main"
-                      if publish_if_current(number, head, state, description, token, run_url, workflow_source):
-                          results.append((number, head, state))
+                      v1_published = publish_if_current(number, head, state, description, token, run_url,
+                                                        workflow_source)
+                      if v1_published:
                           print(f"PR #{number} {head}: {state}")
+                      try:
+                          profile, adoption = verify_messaging_v2_contract(head, token, entries)
+                          if adoption == "dormant":
+                              v2_state = "success"
+                              v2_description = "Dormant Messaging v2 provenance verified; not adopted"
+                          else:
+                              v2_state = "success"
+                              v2_description = "Trusted Messaging v2 profile verified: " + profile
+                      except OSError:
+                          v2_state, v2_description = "error", "Messaging v2 contract could not be fetched; retry verification"
+                      except (ValueError, KeyError, TypeError):
+                          v2_state, v2_description = "failure", "Messaging v2 contract profile is not authorized"
+                      v2_published = publish_if_current(number, head, v2_state, v2_description, token, run_url,
+                                                        workflow_source, MESSAGING_V2_STATUS_CONTEXT)
+                      if v2_published:
+                          print(f"PR #{number} {head} Messaging v2: {v2_state} ({v2_description})")
+                      if v1_published and v2_published:
+                          results.append((number, head, state, v2_state))
                   except (ValueError, KeyError, TypeError, OSError) as error:
                       publication_failed = True
                       identifier = number if type(number) is int else "unknown"
@@ -362,13 +428,20 @@ jobs:
               return results
 
 
+          def require_messaging_v2_success(results):
+              """Keep the trusted workflow red on invalid V2 bytes or unavailable verification."""
+              if any(v2_state in ("failure", "error") for _, _, _, v2_state in results):
+                  raise ValueError("Messaging v2 contract verification did not succeed")
+
+
           if __name__ == "__main__":
               import os
               try:
                   with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as event_file:
                       event = json.load(event_file)
-                  revalidate(os.environ["GH_TOKEN"], os.environ["RUN_URL"], os.environ["WORKFLOW_SHA"],
-                             os.environ["EVENT_NAME"], event)
+                  results = revalidate(os.environ["GH_TOKEN"], os.environ["RUN_URL"], os.environ["WORKFLOW_SHA"],
+                                       os.environ["EVENT_NAME"], event)
+                  require_messaging_v2_success(results)
               except (ValueError, KeyError, TypeError, OSError):
                   raise SystemExit("Trusted contract revalidation failed; no PR code was executed.") from None
           PYTHON
