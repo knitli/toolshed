@@ -53,7 +53,9 @@ ACTIVE_V2_SOURCE_HASHES = {
     "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts": "3f91122c7bd2d78d072ad51a9fb2fef4adfb99e3277bf4052196a54a74238193",
     "apps/os/packages/event-runtime/src/protocol.ts": "b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d",
     "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
-    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": ACTIVE_V2_HASHES["messaging-v2/messaging-protocol-semantics-v2.json"],
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": (
+        ACTIVE_V2_HASHES["messaging-v2/messaging-protocol-semantics-v2.json"]
+    ),
     "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json": ACTIVE_V2_HASHES["messaging-v2/messaging-v2-wire.json"],
     "apps/os/pnpm-lock.yaml": "62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549",
 }
@@ -190,8 +192,16 @@ class ContractWorkflowTests(unittest.TestCase):
                 blob = archive.read(f"snapshots/{ACTIVE_V2_NAME}/{contract_path}")
                 self.assertEqual(hashlib.sha256(blob).hexdigest(), ACTIVE_V2_HASHES[contract_path])
             for receipt_path, fixture_path, fixture_hash in (
-                (MESSAGING_V2_PATHS[2], "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json", ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[0]]),
-                (MESSAGING_V2_PATHS[3], "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json", ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[1]]),
+                (
+                    MESSAGING_V2_PATHS[2],
+                    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json",
+                    ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[0]],
+                ),
+                (
+                    MESSAGING_V2_PATHS[3],
+                    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json",
+                    ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[1]],
+                ),
             ):
                 receipt = json.loads(archive.read(f"snapshots/{ACTIVE_V2_NAME}/{receipt_path}"))
                 self.assertEqual(receipt["purpose"], "active_assigned_stock_v2_policy_adoption")
