@@ -269,6 +269,28 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         listed_again = self.store.list_stock_recovery()["deliveries"][0]
         self.assertEqual(listed_again["operatorDisposition"], first)
 
+    async def test_stock_recovery_listing_skips_malformed_runtime_profile_without_leaking(self):
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))):
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
+        attempt = self.store.current_attempt(delivery)
+        malformed = copy.deepcopy(attempt["envelope"])
+        malformed_profile = dict(malformed["runtimeProfile"])
+        malformed_profile.pop("conversationId")
+        malformed["runtimeProfile"] = malformed_profile
+        admission = copy.deepcopy(attempt["admission"])
+        admission["envelope"]["runtimeProfile"] = malformed_profile
+        self.store.db.execute(
+            "UPDATE attempts SET envelope=?, admission=? WHERE delivery_id=?",
+            (json.dumps(malformed), json.dumps(admission), delivery),
+        )
+
+        result = self.store.list_stock_recovery(delivery_id=delivery)
+
+        self.assertEqual(result, {"deliveries": [], "truncated": False})
+        self.assertNotIn("conversationId", json.dumps(result))
+
     async def test_crash_before_and_after_client_send_recover_as_ambiguous(self):
         class Crash(BaseException):
             pass
