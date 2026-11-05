@@ -27,6 +27,43 @@ PATHS = (
     "event-v1/policy.ts", "event-v1/protocol-v1.json", "event-v1/manifest.json",
     "event-control-v1/fixtures.json", "event-control-v1/manifest.json",
 )
+MESSAGING_V2_PATHS = (
+    "messaging-v2/messaging-protocol-semantics-v2.json",
+    "messaging-v2/messaging-v2-wire.json",
+    "messaging-v2/source-receipt.json",
+    "messaging-v2/wire-source-receipt.json",
+)
+MESSAGING_V2_ADOPTION_FIXTURE = {
+    "name": "test-only-assigned-stock-profile",
+    "adoption": "trusted",
+    "hashes": {path: "0" * 64 for path in MESSAGING_V2_PATHS},
+}
+ACTIVE_V2_NAME = "active-assigned-stock-v2"
+ACTIVE_V2_SOURCE_SHA = "e954904603b3467e30bbeaf7446977b61fbcb9ef"
+ACTIVE_V2_SOURCE_TREE = "f47bb9345aa17f9b504965bd5c319163b569c9df"
+ACTIVE_V2_ARCHIVE = "tests/fixtures/messaging-v2-active-assigned-stock.zip"
+ACTIVE_V2_ARCHIVE_SHA256 = "adc3842002feb70851031312e85571866e216b25342382a99365c29d099b395c"
+ACTIVE_V2_HASHES = {
+    "messaging-v2/messaging-protocol-semantics-v2.json": "0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f",
+    "messaging-v2/messaging-v2-wire.json": "a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032",
+    "messaging-v2/source-receipt.json": "6a972450486b48eccdfc8a82f077139689bf5b3b5990c4a3ca7836c247f922df",
+    "messaging-v2/wire-source-receipt.json": "4fd527d2d963d07a01c9b2d8491bee4813ad4f826eb4537698aba6ea6c1e58e2",
+}
+ACTIVE_V2_SOURCE_HASHES = {
+    "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts": "3f91122c7bd2d78d072ad51a9fb2fef4adfb99e3277bf4052196a54a74238193",
+    "apps/os/packages/event-runtime/src/protocol.ts": "b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d",
+    "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": (
+        ACTIVE_V2_HASHES["messaging-v2/messaging-protocol-semantics-v2.json"]
+    ),
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json": ACTIVE_V2_HASHES["messaging-v2/messaging-v2-wire.json"],
+    "apps/os/pnpm-lock.yaml": "62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549",
+}
+ACTIVE_V2_SCHEMA_HASHES = {
+    "package.json": "a046ed85fa09571dba539fee9ef236152d12dabd1f229b014ec3bd2ebaad9000",
+    "v4/core/checks.js": "bc42543274218aa7ef72192b3218d2a4a399e53df8de240a04d9ff275096f563",
+    "v4/core/util.js": "728f52b496620336775eafcdb91c0a574380086e53f215b55c58eedc1422c49c",
+}
 STOCK_NAME = 'assigned-stock-github-delivery'
 STOCK_REVISION = '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa'
 STOCK_ARCHIVE = 'tests/fixtures/assigned-stock-contract-family.zip'
@@ -55,10 +92,16 @@ class ContractWorkflowTests(unittest.TestCase):
         self.original = {SNAPSHOT + path: (PACKAGE / "contracts" / path).read_bytes()
                          for path in PATHS}
         self.blobs = self.original.copy()
+        self.messaging_v2 = {
+            SNAPSHOT + path: (PACKAGE / "contracts" / path).read_bytes()
+            for path in MESSAGING_V2_PATHS
+        }
+        self.blobs.update(self.messaging_v2)
         self.reads = []
         self.api_reads = []
         self.tree = {"truncated": False, "tree": [
-            {"path": SNAPSHOT + path, "type": "blob", "mode": "100644"} for path in PATHS]}
+            {"path": SNAPSHOT + path, "type": "blob", "mode": "100644"}
+            for path in (*PATHS, *MESSAGING_V2_PATHS)]}
         self.rotated = {path: value + b"\n" for path, value in self.original.items()}
         for path in ("event-v1/manifest.json", "event-control-v1/manifest.json"):
             manifest = json.loads(self.original[SNAPSHOT + path])
@@ -91,6 +134,141 @@ class ContractWorkflowTests(unittest.TestCase):
         with patch.dict(POLICY, replacements):
             return POLICY["verify_contract"](head, "test-token")
 
+    def verify_messaging_v2(self, profiles=None, head=HEAD):
+        def request(endpoint, token, payload=None):
+            self.api_reads.append(endpoint)
+            self.assertEqual(endpoint, f"git/trees/{HEAD}?recursive=1")
+            self.assertEqual(token, "test-token")
+            self.assertIsNone(payload)
+            return self.tree
+        replacements = {"read_blob": self.read_blob, "request_json": request}
+        if profiles is not None:
+            replacements["MESSAGING_V2_PROFILES"] = profiles
+        with patch.dict(POLICY, replacements):
+            return POLICY["verify_messaging_v2_contract"](head, "test-token")
+
+    def active_contract_blobs(self):
+        with zipfile.ZipFile(PACKAGE / ACTIVE_V2_ARCHIVE) as archive:
+            return {SNAPSHOT + path: archive.read(f"snapshots/{ACTIVE_V2_NAME}/{path}")
+                    for path in MESSAGING_V2_PATHS}
+
+    def test_dormant_messaging_v2_profile_is_provenance_only(self):
+        self.assertEqual(self.verify_messaging_v2(),
+                         ("dormant-source-conformance", "dormant"))
+        receipt = json.loads(self.messaging_v2[SNAPSHOT + MESSAGING_V2_PATHS[2]])
+        self.assertFalse(receipt["trustedPolicyAdoption"])
+        self.assertCountEqual(self.reads, [SNAPSHOT + path for path in MESSAGING_V2_PATHS])
+
+    def test_active_messaging_v2_archive_pins_exact_merged_source_and_schema(self):
+        archive_path = PACKAGE / ACTIVE_V2_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(), ACTIVE_V2_ARCHIVE_SHA256)
+        with zipfile.ZipFile(archive_path) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            expected_members = {"metadata.json"}
+            expected_members.update(f"snapshots/{ACTIVE_V2_NAME}/{path}" for path in MESSAGING_V2_PATHS)
+            expected_members.update(f"sources/{ACTIVE_V2_SOURCE_SHA}/{path}" for path in ACTIVE_V2_SOURCE_HASHES)
+            expected_members.update(f"dependencies/zod@4.6.5/{path}" for path in ACTIVE_V2_SCHEMA_HASHES)
+            self.assertEqual(len(archive.namelist()), len(set(archive.namelist())))
+            self.assertEqual(set(archive.namelist()), expected_members)
+            self.assertEqual(metadata["profile"], ACTIVE_V2_NAME)
+            self.assertEqual(metadata["adoption"], "active")
+            self.assertEqual(metadata["sourceCommit"], ACTIVE_V2_SOURCE_SHA)
+            self.assertEqual(metadata["sourceTree"], ACTIVE_V2_SOURCE_TREE)
+            self.assertEqual(metadata["contractHashes"], ACTIVE_V2_HASHES)
+            self.assertEqual({entry["path"]: entry["sha256"] for entry in metadata["sourceFiles"]},
+                             ACTIVE_V2_SOURCE_HASHES)
+            for path, digest in ACTIVE_V2_SOURCE_HASHES.items():
+                archived = archive.read(f"sources/{ACTIVE_V2_SOURCE_SHA}/{path}")
+                self.assertEqual(hashlib.sha256(archived).hexdigest(), digest)
+            schema = metadata["schemaDependency"]
+            self.assertEqual((schema["package"], schema["version"]), ("zod", "4.6.5"))
+            self.assertEqual({entry["path"]: entry["sha256"] for entry in schema["files"]},
+                             ACTIVE_V2_SCHEMA_HASHES)
+            for path, digest in ACTIVE_V2_SCHEMA_HASHES.items():
+                archived = archive.read(f"dependencies/zod@4.6.5/{path}")
+                self.assertEqual(hashlib.sha256(archived).hexdigest(), digest)
+            self.assertEqual(json.loads(archive.read("dependencies/zod@4.6.5/package.json"))["version"], "4.6.5")
+            for contract_path in MESSAGING_V2_PATHS:
+                blob = archive.read(f"snapshots/{ACTIVE_V2_NAME}/{contract_path}")
+                self.assertEqual(hashlib.sha256(blob).hexdigest(), ACTIVE_V2_HASHES[contract_path])
+            for receipt_path, fixture_path, fixture_hash in (
+                (
+                    MESSAGING_V2_PATHS[2],
+                    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json",
+                    ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[0]],
+                ),
+                (
+                    MESSAGING_V2_PATHS[3],
+                    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json",
+                    ACTIVE_V2_HASHES[MESSAGING_V2_PATHS[1]],
+                ),
+            ):
+                receipt = json.loads(archive.read(f"snapshots/{ACTIVE_V2_NAME}/{receipt_path}"))
+                self.assertEqual(receipt["purpose"], "active_assigned_stock_v2_policy_adoption")
+                self.assertTrue(receipt["trustedPolicyAdoption"])
+                self.assertEqual(receipt["sourceCommit"], ACTIVE_V2_SOURCE_SHA)
+                self.assertEqual(receipt["sourceTree"], ACTIVE_V2_SOURCE_TREE)
+                self.assertEqual({entry["path"]: entry["sha256"] for entry in receipt["sourceFiles"]},
+                                 ACTIVE_V2_SOURCE_HASHES)
+                self.assertEqual(receipt["schemaDependency"], schema)
+                self.assertEqual(receipt["fixture"]["sha256"], fixture_hash)
+                self.assertEqual(receipt["fixture"]["file"], fixture_path)
+
+        profiles = POLICY["MESSAGING_V2_PROFILES"]
+        dormant = next(profile for profile in profiles if profile["name"] == "dormant-source-conformance")
+        active = next(profile for profile in profiles if profile["name"] == ACTIVE_V2_NAME)
+        self.assertEqual(dormant["adoption"], "dormant")
+        self.assertEqual(dormant["hashes"], {
+            "messaging-v2/messaging-protocol-semantics-v2.json": "74c37fe03b019c153a4ac81c11253618a1444eea63d794d70e9899699e2f786d",
+            "messaging-v2/messaging-v2-wire.json": "9b5c4030c7059f68c55d1e0a2dad51eb276ed585b8dac18b437ff9ae97900129",
+            "messaging-v2/source-receipt.json": "ec07eabf0dbeecfeb1170e48f435b4ffdcbb0554516aff24153f0d276572ad7d",
+            "messaging-v2/wire-source-receipt.json": "146dc8c15c41d1c4da9a59537cf693d6a3a6dcad30dc2e7d94f9d129a5bc3e88",
+        })
+        self.assertEqual((active["adoption"], active["hashes"]), ("active", ACTIVE_V2_HASHES))
+        self.blobs.update(self.active_contract_blobs())
+        self.assertEqual(self.verify_messaging_v2(), (ACTIVE_V2_NAME, "active"))
+
+    def test_active_messaging_v2_profile_rejects_each_single_blob_mutation(self):
+        active = next(profile for profile in POLICY["MESSAGING_V2_PROFILES"]
+                      if profile["name"] == ACTIVE_V2_NAME)
+        for path in MESSAGING_V2_PATHS:
+            with self.subTest(path=path):
+                self.blobs = self.active_contract_blobs()
+                self.blobs[SNAPSHOT + path] += b"mutation"
+                with self.assertRaisesRegex(ValueError, "Messaging v2 contract profile not authorized"):
+                    self.verify_messaging_v2((active,))
+
+    def test_active_messaging_v2_profile_publishes_distinct_status(self):
+        self.blobs.update(self.active_contract_blobs())
+        results, posts, _ = self.refresh()
+        self.assertEqual(results, [(1, HEAD, "success", "success")])
+        v2_posts = [payload for _, payload in posts
+                    if payload["context"] == "Event Gateway / Messaging v2 contract"]
+        self.assertEqual([(payload["state"], payload["description"]) for payload in v2_posts], [
+            ("pending", "Checking exact Messaging v2 contract profile"),
+            ("success", "Active trusted Messaging v2 profile verified: " + ACTIVE_V2_NAME),
+        ])
+        self.assertEqual(sum(payload["state"] == "success" for _, payload in posts
+                             if payload["context"] == "Event Gateway / trusted contract"), 1)
+
+    def test_messaging_v2_profile_fixture_is_test_only_and_exact(self):
+        profile = dict(MESSAGING_V2_ADOPTION_FIXTURE, hashes={
+            path: hashlib.sha256(self.messaging_v2[SNAPSHOT + path]).hexdigest()
+            for path in MESSAGING_V2_PATHS
+        })
+        self.assertEqual(self.verify_messaging_v2((profile,)),
+                         ("test-only-assigned-stock-profile", "trusted"))
+        self.blobs[SNAPSHOT + MESSAGING_V2_PATHS[0]] += b"mutation"
+        with self.assertRaisesRegex(ValueError, "Messaging v2 contract profile not authorized"):
+            self.verify_messaging_v2((profile,))
+
+    def test_messaging_v2_profile_rejects_omitted_source_receipt(self):
+        self.tree["tree"] = [entry for entry in self.tree["tree"]
+                              if entry["path"] != SNAPSHOT + MESSAGING_V2_PATHS[2]]
+        with self.assertRaisesRegex(ValueError, "not a regular Git blob"):
+            self.verify_messaging_v2()
+        self.assertEqual(self.reads, [])
+
     def approved_snapshot(self, name):
         # Read immutable data only: no extraction, source evaluation, or Git/network dependency.
         archive_path = PACKAGE / (STOCK_ARCHIVE if name == STOCK_NAME else "tests/fixtures/trusted-contract-families.zip")
@@ -122,6 +300,7 @@ class ContractWorkflowTests(unittest.TestCase):
             "github-initial-plan-material", "github-material-page-parity",
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
+        self.assertEqual(tuple(POLICY["MESSAGING_V2_PATHS"]), MESSAGING_V2_PATHS)
         for expected in historical["families"] + [STOCK_FAMILY]:
             with self.subTest(family=expected["name"]):
                 self.blobs = self.approved_snapshot(expected["name"])
@@ -862,7 +1041,7 @@ class ContractWorkflowTests(unittest.TestCase):
                     self.read_response(json.dumps(valid | change).encode())
 
     def refresh(self, heads=(HEAD,), during_verification=None, event_name="push", event=None,
-                before_request=None):
+                before_request=None, v2_profiles=None, during_v2_verification=None):
         if event is None:
             event = {"ref": "refs/heads/main"}
         workflow_sha = "c" * 40
@@ -895,7 +1074,7 @@ class ContractWorkflowTests(unittest.TestCase):
             return {}
 
         def read(path, ref, token):
-            nonlocal during_verification
+            nonlocal during_verification, during_v2_verification
             self.assertEqual(token, "test-token")
             if path == ".github/workflows/event-gateway-contract.yml":
                 self.assertIn(ref, (workflow_sha, main_sha))
@@ -903,11 +1082,20 @@ class ContractWorkflowTests(unittest.TestCase):
             self.assertIn(ref, heads)
             candidate_reads.append((path, ref))
             if during_verification is not None:
-                during_verification()
+                callback = during_verification
                 during_verification = None
+                callback()
+            if path in {SNAPSHOT + v2_path for v2_path in MESSAGING_V2_PATHS} \
+                    and during_v2_verification is not None:
+                callback = during_v2_verification
+                during_v2_verification = None
+                callback()
             return self.blobs[path]
 
-        with patch.dict(POLICY, {"request_json": request, "read_blob": read}):
+        replacements = {"request_json": request, "read_blob": read}
+        if v2_profiles is not None:
+            replacements["MESSAGING_V2_PROFILES"] = v2_profiles
+        with patch.dict(POLICY, replacements):
             results = POLICY["revalidate"]("test-token", "https://example.test/run", workflow_sha,
                                             event_name, event)
         return results, posts, candidate_reads
@@ -915,14 +1103,61 @@ class ContractWorkflowTests(unittest.TestCase):
     def test_policy_refresh_verifies_every_open_head(self):
         heads = (HEAD, "b" * 40)
         results, posts, reads = self.refresh(heads)
-        self.assertEqual(results, [(1, heads[0], "success"), (2, heads[1], "success")])
+        self.assertEqual(results, [(1, heads[0], "success", "success"),
+                                   (2, heads[1], "success", "success")])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
                          [("statuses/" + head, state) for head in heads
-                          for state in ("pending", "success")])
-        self.assertCountEqual(reads, [(SNAPSHOT + path, head) for head in heads for path in PATHS])
+                          for state in ("pending", "pending", "success", "success")])
+        self.assertCountEqual(reads, [(SNAPSHOT + path, head) for head in heads
+                                      for path in (*PATHS, *MESSAGING_V2_PATHS)])
         for _, payload in posts:
-            self.assertEqual(payload["context"], "Event Gateway / trusted contract")
+            self.assertIn(payload["context"], ("Event Gateway / trusted contract",
+                                                "Event Gateway / Messaging v2 contract"))
             self.assertEqual(payload["target_url"], "https://example.test/run")
+        self.assertIn("Dormant Messaging v2 provenance verified; not adopted",
+                      [payload["description"] for _, payload in posts])
+
+    def test_trusted_messaging_v2_profile_has_distinct_status(self):
+        profile = dict(MESSAGING_V2_ADOPTION_FIXTURE, hashes={
+            path: hashlib.sha256(self.messaging_v2[SNAPSHOT + path]).hexdigest()
+            for path in MESSAGING_V2_PATHS
+        })
+        results, posts, _ = self.refresh(v2_profiles=(profile,))
+        self.assertEqual(results, [(1, HEAD, "success", "success")])
+        v2_posts = [payload for _, payload in posts
+                    if payload["context"] == "Event Gateway / Messaging v2 contract"]
+        self.assertEqual([(payload["state"], payload["description"]) for payload in v2_posts], [
+            ("pending", "Checking exact Messaging v2 contract profile"),
+            ("success", "Trusted Messaging v2 profile verified: test-only-assigned-stock-profile"),
+        ])
+        self.assertNotIn("Dormant", " ".join(payload["description"] for payload in v2_posts))
+
+    def test_v1_success_does_not_imply_messaging_v2_success(self):
+        self.blobs[SNAPSHOT + MESSAGING_V2_PATHS[0]] += b"unapproved"
+        results, posts, _ = self.refresh()
+        self.assertEqual(results, [(1, HEAD, "success", "failure")])
+        statuses = {payload["context"]: payload["state"] for _, payload in posts
+                    if payload["state"] != "pending"}
+        self.assertEqual(statuses, {
+            "Event Gateway / trusted contract": "success",
+            "Event Gateway / Messaging v2 contract": "failure",
+        })
+        with self.assertRaisesRegex(ValueError, "Messaging v2 contract verification did not succeed"):
+            POLICY["require_messaging_v2_success"](results)
+
+    def test_messaging_v2_verifier_error_fails_job(self):
+        def unavailable():
+            raise OSError("temporary source blob outage")
+        results, posts, _ = self.refresh(during_v2_verification=unavailable)
+        self.assertEqual(results, [(1, HEAD, "success", "error")])
+        v2_final = [payload for _, payload in posts
+                    if payload["context"] == "Event Gateway / Messaging v2 contract"
+                    and payload["state"] != "pending"]
+        self.assertEqual([(payload["state"], payload["description"]) for payload in v2_final], [
+            ("error", "Messaging v2 contract could not be fetched; retry verification"),
+        ])
+        with self.assertRaisesRegex(ValueError, "Messaging v2 contract verification did not succeed"):
+            POLICY["require_messaging_v2_success"](results)
 
     def test_changed_head_during_verification_has_no_final_status(self):
         def advance_head():
@@ -930,8 +1165,8 @@ class ContractWorkflowTests(unittest.TestCase):
         results, posts, reads = self.refresh(during_verification=advance_head)
         self.assertEqual(results, [])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
-                         [("statuses/" + HEAD, "pending")])
-        self.assertEqual(len(reads), len(PATHS))
+                         [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "pending")])
+        self.assertEqual(len(reads), len(PATHS) + len(MESSAGING_V2_PATHS))
 
     def test_changed_policy_during_verification_has_no_final_status(self):
         def advance_policy():
@@ -939,24 +1174,39 @@ class ContractWorkflowTests(unittest.TestCase):
         results, posts, reads = self.refresh(during_verification=advance_policy)
         self.assertEqual(results, [])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
-                         [("statuses/" + HEAD, "pending")])
-        self.assertEqual(len(reads), len(PATHS))
+                         [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "pending")])
+        self.assertEqual(len(reads), len(PATHS) + len(MESSAGING_V2_PATHS))
 
     def test_unauthorized_bytes_publish_failure_on_exact_head(self):
         self.blobs[SNAPSHOT + "event-control-v1/fixtures.json"] += b"unapproved"
         results, posts, reads = self.refresh()
-        self.assertEqual(results, [(1, HEAD, "failure")])
+        self.assertEqual(results, [(1, HEAD, "failure", "success")])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
-                         [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "failure")])
-        self.assertCountEqual(reads, [(SNAPSHOT + path, HEAD) for path in PATHS])
+                         [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "pending"),
+                          ("statuses/" + HEAD, "failure"), ("statuses/" + HEAD, "success")])
+        self.assertCountEqual(reads, [(SNAPSHOT + path, HEAD) for path in (*PATHS, *MESSAGING_V2_PATHS)])
 
     def test_candidate_symlink_rejected_despite_canonical_contents(self):
         for entry in self.tree["tree"]:
+            if entry["path"] not in {SNAPSHOT + path for path in PATHS}:
+                continue
             with self.subTest(path=entry["path"]):
                 entry["mode"] = "120000"
                 self.reads.clear()
                 with self.assertRaises(ValueError):
                     self.verify()
+                self.assertEqual(self.reads, [])
+                entry["mode"] = "100644"
+
+    def test_messaging_v2_symlink_rejected_despite_canonical_contents(self):
+        for entry in self.tree["tree"]:
+            if entry["path"] not in {SNAPSHOT + path for path in MESSAGING_V2_PATHS}:
+                continue
+            with self.subTest(path=entry["path"]):
+                entry["mode"] = "120000"
+                self.reads.clear()
+                with self.assertRaisesRegex(ValueError, "not a regular Git blob"):
+                    self.verify_messaging_v2()
                 self.assertEqual(self.reads, [])
                 entry["mode"] = "100644"
 
@@ -970,29 +1220,32 @@ class ContractWorkflowTests(unittest.TestCase):
         target = "b" * 40
         results, posts, reads = self.refresh(
             (HEAD, target), event_name="workflow_run", event={"workflow_run": {"head_sha": target}})
-        self.assertEqual(results, [(2, target, "success")])
+        self.assertEqual(results, [(2, target, "success", "success")])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
-                         [("statuses/" + target, "pending"), ("statuses/" + target, "success")])
-        self.assertCountEqual(reads, [(SNAPSHOT + path, target) for path in PATHS])
+                         [("statuses/" + target, "pending"), ("statuses/" + target, "pending"),
+                          ("statuses/" + target, "success"), ("statuses/" + target, "success")])
+        self.assertCountEqual(reads, [(SNAPSHOT + path, target) for path in (*PATHS, *MESSAGING_V2_PATHS)])
 
     def test_pull_target_refreshes_only_candidate_without_listing(self):
         target = "b" * 40
         results, posts, reads = self.refresh(
             (HEAD, target), event_name="pull_request_target",
             event={"pull_request": {"number": 2, "head": {"sha": target}}})
-        self.assertEqual(results, [(2, target, "success")])
+        self.assertEqual(results, [(2, target, "success", "success")])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
-                         [("statuses/" + target, "pending"), ("statuses/" + target, "success")])
-        self.assertCountEqual(reads, [(SNAPSHOT + path, target) for path in PATHS])
+                         [("statuses/" + target, "pending"), ("statuses/" + target, "pending"),
+                          ("statuses/" + target, "success"), ("statuses/" + target, "success")])
+        self.assertCountEqual(reads, [(SNAPSHOT + path, target) for path in (*PATHS, *MESSAGING_V2_PATHS)])
         self.assertFalse(any(endpoint.startswith("pulls?") for endpoint in self.runner_api_reads))
 
     def test_transport_failure_publishes_error_on_exact_head(self):
         def unavailable():
             raise OSError("temporary transport outage")
         results, posts, _ = self.refresh(during_verification=unavailable)
-        self.assertEqual(results, [(1, HEAD, "error")])
+        self.assertEqual(results, [(1, HEAD, "error", "success")])
         self.assertEqual([(endpoint, payload["state"]) for endpoint, payload in posts],
-                         [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "error")])
+                         [("statuses/" + HEAD, "pending"), ("statuses/" + HEAD, "pending"),
+                          ("statuses/" + HEAD, "error"), ("statuses/" + HEAD, "success")])
 
     def transient_errors(self):
         error = POLICY["urllib"].error
@@ -1062,11 +1315,12 @@ class ContractWorkflowTests(unittest.TestCase):
                     self.assertEqual(
                         [(endpoint, payload["state"]) for endpoint, payload in self.runner_posts
                          if endpoint == "statuses/" + later_head],
-                        [("statuses/" + later_head, "pending"), ("statuses/" + later_head, "success")],
+                        [("statuses/" + later_head, "pending"), ("statuses/" + later_head, "pending"),
+                         ("statuses/" + later_head, "success"), ("statuses/" + later_head, "success")],
                     )
                     self.assertCountEqual(
                         [path for path, head in self.runner_candidate_reads if head == later_head],
-                        [SNAPSHOT + path for path in PATHS],
+                        [SNAPSHOT + path for path in (*PATHS, *MESSAGING_V2_PATHS)],
                     )
                     self.assertEqual(failed_requests, [(failed_endpoint, failed_state)])
                     self.assertIsInstance(raised.exception, OSError)
