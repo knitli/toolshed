@@ -1,5 +1,13 @@
 import threading
 import unittest
+import os
+import pty
+import json
+import tempfile
+import sys
+import io
+from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
 import subprocess
 from unittest.mock import Mock
@@ -161,6 +169,144 @@ class StockCodexProbeTests(unittest.TestCase):
                          "background_title_generation")
         self.assertEqual(_classify_request_purpose(unknown_request, QUEUE_REFERENCE),
                          "unclassified_user_request")
+
+    def test_upgrade_request_requires_prior_version_seed_and_queue_reference(self):
+        reference = "ref_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        request = {"synthetic_user_text": [
+            "Seed synthetic prior-version session.", reference,
+        ]}
+
+        self.assertTrue(probe._upgrade_request_matches(request, reference))
+        self.assertFalse(probe._upgrade_request_matches(
+            {"synthetic_user_text": [reference]}, reference))
+        self.assertFalse(probe._upgrade_request_matches(
+            {"synthetic_user_text": ["Seed synthetic unrelated session.", reference]}, reference))
+        self.assertFalse(probe._upgrade_request_matches(
+            {"synthetic_user_text": ["Seed synthetic prior-version session."]}, reference))
+
+    def test_tui_startup_failure_closes_both_pty_descriptors(self):
+        master, slave = pty.openpty()
+        try:
+            with patch.object(probe.pty, "openpty", return_value=(master, slave)), \
+                    patch("fcntl.ioctl", side_effect=OSError("injected ioctl failure")):
+                with self.assertRaises(OSError):
+                    probe._tui("codex", "/private", "thread-id")
+        finally:
+            leaked = []
+            for fd in (master, slave):
+                try:
+                    os.fstat(fd)
+                except OSError:
+                    continue
+                leaked.append(fd)
+                os.close(fd)
+            self.assertEqual(leaked, [], "startup failure leaked a PTY descriptor")
+
+    def test_tui_cleanup_records_kill_and_reap_errors_but_closes_pty(self):
+        master, slave = pty.openpty()
+        os.close(slave)
+        process = SimpleNamespace(pid=51, poll=Mock(return_value=None), kill=Mock(
+            side_effect=OSError("injected kill failure")), wait=Mock(
+                side_effect=subprocess.TimeoutExpired("codex", 3)))
+        failures = []
+        try:
+            probe._cleanup_tui(process, master, failures)
+            self.assertEqual([failure["step"] for failure in failures], ["kill", "reap"])
+            process.wait.assert_called_once_with(timeout=3)
+            process.kill.assert_called_once_with()
+            with self.assertRaises(OSError):
+                os.fstat(master)
+        finally:
+            try:
+                os.close(master)
+            except OSError:
+                pass
+
+    def test_graceful_tui_stop_closes_pty_even_when_signal_and_reap_fail(self):
+        master, slave = pty.openpty()
+        os.close(slave)
+        process = SimpleNamespace(pid=52, returncode=None, poll=Mock(return_value=None),
+                                  send_signal=Mock(side_effect=OSError("injected signal failure")),
+                                  kill=Mock(side_effect=OSError("injected kill failure")),
+                                  wait=Mock(side_effect=[subprocess.TimeoutExpired("codex", 8),
+                                                         subprocess.TimeoutExpired("codex", 3)]))
+        failures = []
+        try:
+            probe._stop_tui(process, master, failures)
+            self.assertEqual([failure["step"] for failure in failures], [
+                "interrupt", "kill", "reap_after_kill",
+            ])
+            with self.assertRaises(OSError):
+                os.fstat(master)
+        finally:
+            try:
+                os.close(master)
+            except OSError:
+                pass
+
+    def test_final_tui_cleanup_does_not_close_reused_master_descriptor(self):
+        master, slave = pty.openpty()
+        owner = [master]
+        process = SimpleNamespace(pid=53, returncode=0, poll=Mock(return_value=0),
+                                  wait=Mock(return_value=0))
+        failures = []
+        reused = None
+        extras = []
+        try:
+            probe._stop_tui(process, owner, failures)
+            self.assertIsNone(owner[0])
+            for _ in range(16):
+                descriptor = os.open(os.devnull, os.O_RDONLY)
+                if descriptor == master:
+                    reused = descriptor
+                    break
+                extras.append(descriptor)
+            self.assertEqual(reused, master, "test did not reuse the closed PTY descriptor")
+
+            probe._cleanup_tui(process, owner, failures)
+
+            os.fstat(reused)
+            self.assertEqual(failures, [])
+        finally:
+            for descriptor in extras + ([reused] if reused is not None else []) + [slave]:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    def test_daemon_timeout_and_provider_shutdown_failure_do_not_skip_later_cleanup(self):
+        failures = []
+        probe_server = SimpleNamespace(shutdown=Mock(side_effect=TimeoutError("injected timeout")),
+                                       server_close=Mock())
+        with patch.object(probe, "_cli", side_effect=subprocess.TimeoutExpired("codex", 25)):
+            outcome = probe._stop_daemon("codex", "/private", "previous", failures)
+        probe._close_provider(probe_server, failures)
+
+        self.assertEqual(outcome, {"errorType": "TimeoutExpired"})
+        self.assertEqual(probe_server.shutdown.call_count, 1)
+        self.assertEqual(probe_server.server_close.call_count, 1)
+        self.assertEqual([(failure["resource"], failure["step"])
+                          for failure in failures], [
+            ("daemon:previous", "stop"), ("provider", "shutdown"),
+        ])
+
+    def test_main_writes_cleanup_failure_report_then_exits_nonzero(self):
+        report = {"result": "bounded_synthetic_nonbusy_checks_failed", "cleanupOk": False,
+                  "cleanupFailures": [{"resource": "daemon:qualification", "step": "stop",
+                                       "errorType": "TimeoutExpired"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "cleanup.json"
+            stdout = io.StringIO()
+            with patch.object(sys, "argv", ["probe_stock_codex_queue.py", "--binary", "codex",
+                                             "--output", str(output)]), \
+                    patch.object(probe, "qualify", return_value=report), \
+                    redirect_stdout(stdout):
+                with self.assertRaises(SystemExit) as raised:
+                    probe.main()
+
+            self.assertEqual(raised.exception.code, 1)
+            self.assertEqual(json.loads(output.read_text()), report)
+            self.assertIn('"cleanupOk": false', stdout.getvalue())
 
     def test_busy_gate_requires_held_response_then_exact_followup_but_not_visible_ref(self):
         result = {

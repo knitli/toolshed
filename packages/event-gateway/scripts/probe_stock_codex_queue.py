@@ -1,6 +1,7 @@
 """Bounded stock Codex TUI/daemon qualification using a loopback Responses fixture."""
 
 import argparse
+import errno
 import hashlib
 import http.server
 import json
@@ -126,15 +127,35 @@ def _targets_session(request, reference, expected_marker, forbidden_marker):
 
 def _tui(binary, home, thread_id):
     master, slave = pty.openpty()
-    import fcntl
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
-    command = [str(binary), "--no-alt-screen", "resume", "--include-non-interactive", thread_id]
-    command.extend(("-C", str(home)))
-    process = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
-                               env=_environment(home), close_fds=True)
-    os.close(slave)
-    time.sleep(1.25)
-    return process, master
+    process = None
+    try:
+        import fcntl
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+        command = [str(binary), "--no-alt-screen", "resume", "--include-non-interactive", thread_id]
+        command.extend(("-C", str(home)))
+        process = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave,
+                                   env=_environment(home), close_fds=True)
+        os.close(slave)
+        slave = None
+        time.sleep(1.25)
+        return process, master
+    except BaseException:
+        if process is not None:
+            try:
+                process.kill()
+            except Exception:
+                pass
+            try:
+                process.wait(timeout=3)
+            except Exception:
+                pass
+        for descriptor in (slave, master):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        raise
 
 
 def _open_tui_with_baseline(provider, binary, home, thread_id):
@@ -143,16 +164,109 @@ def _open_tui_with_baseline(provider, binary, home, thread_id):
     return process, master, baseline
 
 
-def _stop_tui(process, master):
-    if process.poll() is None:
-        process.send_signal(signal.SIGINT)
+def _cleanup_error(resource, step, error):
+    return {"resource": resource, "step": step, "errorType": type(error).__name__}
+
+
+def _close_fd(descriptor):
+    try:
+        os.close(descriptor)
+    except OSError as error:
+        if error.errno != errno.EBADF:
+            raise
+
+
+def _close_owned_fd(owner):
+    if isinstance(owner, list):
+        if not owner or owner[0] is None:
+            return
+        descriptor = owner[0]
+        owner[0] = None
+    else:
+        descriptor = owner
+    _close_fd(descriptor)
+
+
+def _stop_tui(process, master, failures=None):
+    failures = failures if failures is not None else []
+    resource = f"tui:{getattr(process, 'pid', 'unknown')}"
+    try:
+        running = process.poll() is None
+    except Exception as error:
+        failures.append(_cleanup_error(resource, "poll", error))
+        running = True
+    if running:
+        try:
+            process.send_signal(signal.SIGINT)
+        except Exception as error:
+            failures.append(_cleanup_error(resource, "interrupt", error))
     try:
         process.wait(timeout=8)
     except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=3)
-    os.close(master)
+        try:
+            process.kill()
+        except Exception as error:
+            failures.append(_cleanup_error(resource, "kill", error))
+        try:
+            process.wait(timeout=3)
+        except Exception as error:
+            failures.append(_cleanup_error(resource, "reap_after_kill", error))
+    except Exception as error:
+        failures.append(_cleanup_error(resource, "wait", error))
+    finally:
+        try:
+            _close_owned_fd(master)
+        except OSError as error:
+            failures.append(_cleanup_error(resource, "close_pty_master", error))
     return process.returncode
+
+
+def _cleanup_tui(process, master, failures):
+    resource = f"tui:{getattr(process, 'pid', 'unknown')}"
+    try:
+        running = process.poll() is None
+    except Exception as error:
+        failures.append(_cleanup_error(resource, "poll", error))
+        running = True
+    if running:
+        try:
+            process.kill()
+        except Exception as error:
+            failures.append(_cleanup_error(resource, "kill", error))
+        try:
+            process.wait(timeout=3)
+        except Exception as error:
+            failures.append(_cleanup_error(resource, "reap", error))
+    try:
+        _close_owned_fd(master)
+    except OSError as error:
+        failures.append(_cleanup_error(resource, "close_pty_master", error))
+
+
+def _stop_daemon(binary, home, label, failures):
+    try:
+        stopped = _cli(binary, home, "app-server", "daemon", "stop")
+    except Exception as error:
+        failures.append(_cleanup_error(f"daemon:{label}", "stop", error))
+        return {"errorType": type(error).__name__}
+    try:
+        status = json.loads(stopped.stdout).get("status")
+    except (json.JSONDecodeError, AttributeError, TypeError) as error:
+        failures.append(_cleanup_error(f"daemon:{label}", "parse_stop_status", error))
+        status = None
+    outcome = {"exit": stopped.returncode, "status": status}
+    if stopped.returncode != 0 or status != "stopped":
+        failures.append({"resource": f"daemon:{label}", "step": "stop_confirmation",
+                         "errorType": "StopNotConfirmed"})
+    return outcome
+
+
+def _close_provider(probe, failures):
+    for step in ("shutdown", "server_close"):
+        try:
+            getattr(probe, step)()
+        except Exception as error:
+            failures.append(_cleanup_error("provider", step, error))
 
 
 def _environment(home):
@@ -183,6 +297,11 @@ def _seed(binary, home, prompt):
     return next(event["thread_id"] for event in events if event.get("type") == "thread.started")
 
 
+def _upgrade_request_matches(request, reference):
+    return (_has_session_marker(request, "Seed synthetic prior-version session.")
+            and reference in request.get("synthetic_user_text", []))
+
+
 def qualify(binary):
     binary = Path(binary).resolve(strict=True)
     if not os.access(binary, os.X_OK):
@@ -201,6 +320,7 @@ def qualify(binary):
             "supports_websockets = false\n")
         daemon_started = False
         tuis = []
+        cleanup_failures = []
         try:
             version = _cli(binary, home, "--version")
             if version.returncode:
@@ -220,7 +340,8 @@ def qualify(binary):
             session_b_marker = "Seed synthetic session B."
             tui_b, pty_b, cross_session_baseline = _open_tui_with_baseline(
                 probe, binary, home, thread_b)
-            tuis.append((tui_b, pty_b))
+            pty_b_owner = [pty_b]
+            tuis.append((tui_b, pty_b_owner))
             result["requestsBeforeCrossSessionTui"] = cross_session_baseline
             first_ref = "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
             queued = _cli(binary, home, "queue", "--thread", thread_a, "--message", first_ref, "--resume")
@@ -241,11 +362,12 @@ def qualify(binary):
                     or not result["BStillOpen"] or not result["BStayedIdle"]):
                 raise RuntimeError("explicit_session_queue_not_observed")
             result["responseForA"] = first
-            result["BExit"] = _stop_tui(tui_b, pty_b)
+            result["BExit"] = _stop_tui(tui_b, pty_b_owner, cleanup_failures)
 
             tui_a, pty_a = _tui(binary, home, thread_a)
-            tuis.append((tui_a, pty_a))
-            result["AExit"] = _stop_tui(tui_a, pty_a)
+            pty_a_owner = [pty_a]
+            tuis.append((tui_a, pty_a_owner))
+            result["AExit"] = _stop_tui(tui_a, pty_a_owner, cleanup_failures)
             status = _cli(binary, home, "app-server", "daemon", "version")
             result["daemonAfterTuiExit"] = json.loads(status.stdout).get("status")
             second_ref = "ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -266,7 +388,8 @@ def qualify(binary):
 
             tui_a, pty_a, reopen_baseline = _open_tui_with_baseline(
                 probe, binary, home, thread_a)
-            tuis.append((tui_a, pty_a))
+            pty_a_owner = [pty_a]
+            tuis.append((tui_a, pty_a_owner))
             result["reopenedA"] = tui_a.poll() is None
             if not result["reopenedA"]:
                 raise RuntimeError("same_uuid_tui_reopen_not_observed")
@@ -277,7 +400,7 @@ def qualify(binary):
                 result["reopenRequestCount"] == result["postReopenRequestCount"])
             if not result["reopenCausedNoNewProviderRequest"]:
                 raise RuntimeError("reopen_replayed_queued_input")
-            result["AReopenExit"] = _stop_tui(tui_a, pty_a)
+            result["AReopenExit"] = _stop_tui(tui_a, pty_a_owner, cleanup_failures)
 
             duplicate_ref = "ref_dddddddd-dddd-4ddd-8ddd-dddddddddddd"
             thread_c = _seed(binary, home, "Seed synthetic duplicate-check session.")
@@ -292,25 +415,15 @@ def qualify(binary):
             result["providerRequests"] = probe.requests
             result["result"] = "bounded_synthetic_nonbusy_checks_passed"
         finally:
-            for process, master in tuis:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait(timeout=3)
-                try:
-                    os.close(master)
-                except OSError:
-                    pass
+            for process, master_owner in tuis:
+                _cleanup_tui(process, master_owner, cleanup_failures)
             if daemon_started:
-                stopped = _cli(binary, home, "app-server", "daemon", "stop")
-                try:
-                    status = json.loads(stopped.stdout).get("status")
-                except (json.JSONDecodeError, AttributeError):
-                    status = None
-                result["daemonCleanup"] = {"exit": stopped.returncode, "status": status}
-                if stopped.returncode or status != "stopped":
-                    raise RuntimeError("private_daemon_cleanup_failed")
-            probe.shutdown()
-            probe.server_close()
+                result["daemonCleanup"] = _stop_daemon(binary, home, "qualification", cleanup_failures)
+            _close_provider(probe, cleanup_failures)
+            result["cleanupFailures"] = cleanup_failures
+            result["cleanupOk"] = not cleanup_failures
+            if cleanup_failures:
+                result["result"] = "bounded_synthetic_nonbusy_checks_failed"
     return result
 
 
@@ -335,6 +448,7 @@ def qualify_upgrade(previous_binary, current_binary):
             "supports_websockets = false\n")
         previous_daemon_stop_required = False
         current_daemon_stop_required = False
+        cleanup_failures = []
         try:
             previous_version = _cli(previous_binary, home, "--version")
             current_version = _cli(current_binary, home, "--version")
@@ -377,36 +491,32 @@ def qualify_upgrade(previous_binary, current_binary):
             queued = _cli(current_binary, home, "queue", "--thread", thread_id,
                           "--message", reference, "--resume")
             result["queue"] = {"exit": queued.returncode, "output": queued.stdout.strip()}
-            seen = _wait_for(probe, lambda row: reference in row["synthetic_user_text"],
+            seen = _wait_for(probe, lambda row: _upgrade_request_matches(row, reference),
                              before_queue)
             result["queueTargetsExactPriorUUID"] = _queue_targets(queued, thread_id)
+            result["priorVersionSeedPresentInReceivedHistory"] = bool(
+                seen and _has_session_marker(seen, "Seed synthetic prior-version session."))
             result["sameThreadResumedAfterUpgrade"] = bool(
-                result["queueTargetsExactPriorUUID"] and seen)
+                result["queueTargetsExactPriorUUID"]
+                and result["priorVersionSeedPresentInReceivedHistory"] and seen)
             result["matchingSyntheticRequest"] = seen
             result["result"] = "bounded_same_home_upgrade_passed"
             if not result["sameThreadResumedAfterUpgrade"]:
                 raise RuntimeError("current_version_did_not_resume_prior_thread")
         finally:
-            cleanup_failures = []
             for label, binary, required in (
                 ("current", current_binary, current_daemon_stop_required),
                 ("previous", previous_binary, previous_daemon_stop_required),
             ):
                 if not required:
                     continue
-                stopped = _cli(binary, home, "app-server", "daemon", "stop")
-                try:
-                    status = json.loads(stopped.stdout).get("status")
-                except (json.JSONDecodeError, AttributeError):
-                    status = None
-                result.setdefault("daemonCleanup", {})[label] = {
-                    "exit": stopped.returncode, "status": status}
-                if stopped.returncode != 0 or status != "stopped":
-                    cleanup_failures.append(label)
-            probe.shutdown()
-            probe.server_close()
+                result.setdefault("daemonCleanup", {})[label] = _stop_daemon(
+                    binary, home, label, cleanup_failures)
+            _close_provider(probe, cleanup_failures)
+            result["cleanupFailures"] = cleanup_failures
+            result["cleanupOk"] = not cleanup_failures
             if cleanup_failures:
-                raise RuntimeError("daemon_cleanup_failed:" + ",".join(cleanup_failures))
+                result["result"] = "bounded_same_home_upgrade_failed"
     return result
 
 
@@ -425,6 +535,8 @@ def main():
     if args.output:
         args.output.write_text(encoded)
     print(encoded, end="")
+    if result.get("cleanupOk") is False:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

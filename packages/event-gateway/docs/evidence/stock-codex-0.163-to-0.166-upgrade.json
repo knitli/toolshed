@@ -27,6 +27,7 @@
     "exactPriorUUIDTarget": true,
     "exit": 0,
     "matchingLoopbackRequestNumber": 2,
+    "priorVersionSeedPresentInReceivedHistory": true,
     "queuedMessageId": "01a1a8d8-9092-7b71-92e6-ad703df97569",
     "sameThreadResumedAfterUpgrade": true,
     "syntheticReference": "ref_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
