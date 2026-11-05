@@ -277,7 +277,7 @@ def _environment(home):
 
 def _cli(binary, home, *args, timeout=25):
     return subprocess.run([str(binary), *args], env=_environment(home), text=True,
-                          capture_output=True, timeout=timeout)
+                          capture_output=True, stdin=subprocess.DEVNULL, timeout=timeout)
 
 
 def _queue_targets(result, thread_id):
