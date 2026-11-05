@@ -1,16 +1,25 @@
-# Dormant Messaging v2 source conformance
+# Active Messaging v2 contract profile
 
-`event_gateway.messaging_protocol_v2` implements the decoded DTO and dormant raw-wire
-contracts from Cloud's `src/messaging/protocol-v2.ts`. It is not imported by the gateway,
-listener, store, native adapters, claim path or producer. Version 1 validation,
-contract pins, trusted families, packaging configuration and workflows are
-unchanged. This module does not enable Messaging delivery or native execution.
+`event_gateway.messaging_protocol_v2` implements the decoded DTO and raw-wire
+contracts from Cloud's `src/messaging/protocol-v2.ts`. The trusted contract
+workflow now adopts the exact four-blob assigned-stock V2 profile at merged
+source commit `e954904603b3467e30bbeaf7446977b61fbcb9ef`. This is active contract
+policy adoption, not a production rollout. On the explicit stock-only path,
+the listener routes V2 envelopes through V2 admission and the store validates
+the assigned-stock profile and conversation before the configured Codex CLI
+queues the opaque event reference. A successful CLI exit is recorded as
+`command_accepted`; it means the command accepted the queue request, not that a
+native turn started or completed. Unknown CLI outcomes remain ambiguous and
+are not automatically reissued by the Gateway. Version 1 validation, contract
+pins, trusted families and packaging configuration remain unchanged. This path
+does not enable V2 native execution or claim production activation.
 
 The exact upstream fixture is stored separately under `contracts/messaging-v2`.
-`source-receipt.json` records the Cloud source revision and SHA-256 values,
-including its lockfile and the relevant installed Zod files. This is evidence of
-source conformance, **not a trusted-policy adoption manifest**. No release or
-runtime code consumes that receipt. The fixture is for source-tree tests; the
+The two source receipts record the Cloud source revision and SHA-256 values,
+including its lockfile and the relevant installed Zod files. They are provenance
+evidence, not self-authorizing manifests: authorization comes from the trusted
+workflow's exact SHA-256 mapping for all four profile blobs. No release or
+runtime code consumes the receipts. The fixtures are for source-tree tests; the
 existing wheel's v1 contract-data packaging is unchanged.
 
 | Function | Meaning |
@@ -18,14 +27,15 @@ existing wheel's v1 contract-data packaging is unchanged.
 | `parse_envelope(body, now_ms=None)` | Parse bounded raw JSON and validate envelope shape/freshness |
 | `parse_acknowledgment(body, now_ms=None)` | Parse bounded raw JSON and validate ACK shape/freshness |
 | `validate_envelope(value, now_ms=None)` | Strict decoded envelope shape, compact JSON byte limit, canonical timestamps and freshness |
-| `validate_acknowledgment(value, now_ms=None)` | Strict decoded submitted/observed ACK and timestamp/skew checks |
+| `validate_acknowledgment(value, now_ms=None)` | Strict decoded submitted/observed or assigned-stock `command_accepted` ACK and timestamp/skew checks |
 | `derive_delivery_id(identity)` | Version-2 SHA-256 digest over the eight Cloud destination/identity selectors |
 | `matches_delivery_id(envelope)` | Compare the supplied delivery ID with that digest |
 | `acknowledgment_matches_delivery(envelope, acknowledgment)` | Match every attempt, owner, destination, generation and source-version field |
 
 Digest derivation accepts a full envelope and projects the same eight fields as
 Cloud. Attempts and timestamps do not change delivery identity. ACK mapping
-accepts both native stages; it neither advances a watermark nor settles work.
+accepts both native stages and the assigned-stock `command_accepted` stage; it
+does not advance a watermark or settle work.
 Mapping requires valid shapes but does not refresh their freshness or establish
 current authority. Publisher authenticity, registered keys, route consent,
 consumer qualification and native evidence remain external requirements.
@@ -49,15 +59,16 @@ combines surrogate pairs and escapes lone surrogates as `JSON.stringify` does.
 Canonical timestamps require exactly three fractional digits and `Z`, including
 ECMAScript year `0000`; invalid calendar dates are refused.
 
-## Dormant raw-wire boundary
+## Raw-wire boundary
 
 `parse_envelope` and `parse_acknowledgment` accept only exact built-in `str` or
 `bytes`. They return a validated DTO or raise `MessagingProtocolError` containing
 only a safe reason code. They lazily reuse `event_gateway.protocol._decode`:
 4096 raw UTF-8 bytes maximum, strict UTF-8, duplicate decoded keys rejected at
 any nesting level, and maximum depth 32 (root depth zero, scalar leaves counted).
-The v1 decoder and active entry points are unchanged. Importing the decoded v2
-module does not load the v1 schema or `jsonschema`; an explicit wire call does.
+The v1 decoder remains unchanged. The stock-only listener path explicitly
+routes V2 envelopes to this parser; importing the decoded v2 module does not
+load the v1 schema or `jsonschema`, while an explicit wire call does.
 
 Whitespace counts toward the raw byte cap. BOM-prefixed JSON and malformed UTF-8
 are rejected. Escaped lone surrogates retain the decoded DTO semantics above;
@@ -77,9 +88,10 @@ consumer authority, native execution, acknowledgment settlement, or activation.
 
 `messaging-v2-wire.json` mirrors the Cloud-owned raw fixture exactly. Its cases
 encode raw bytes as `utf8Hex`, including malformed UTF-8, and record verdicts and
-safe reason codes for both implementations. The separate wire source receipt
-records upstream source/fixture hashes as provenance only; it does not update
-active contract pins or adopt a trusted runtime policy.
+safe reason codes for both implementations. The wire source receipt records the
+upstream source and fixture hashes used by the active contract profile. It does
+not authorize itself or activate a runtime path; the receipt alone grants no
+runtime authority, and this documentation does not claim production rollout.
 
 ## Local verification
 

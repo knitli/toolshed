@@ -1,6 +1,6 @@
 # Stock client operations and qualification — 2026-11-04
 
-This is the operator procedure for the existing Gateway controls, Messaging v2 handoff, and ambiguous stock recovery. The current integration worktree contains the V2 handoff and recovery implementation; its 305 focused tests across CLI, daemon, store, stock control, Gateway, listener, Cloud, V2 protocol/admission, journal, and wire passed. This source snapshot is not merged or installed; trusted immutable V2 contract pinning and the consumer PR remain pending. Production stock remains disabled, and live E3/E4 qualification has not run. These instructions do not enable a route or authorize production activation.
+This is the operator procedure for the existing Gateway controls, Messaging v2 handoff, and ambiguous stock recovery. The integrated E1/Gateway suite passes 377 tests across CLI, daemon, store, stock control, Gateway, listener, Cloud, V2 protocol/admission, journal, wire, Codex adapter/probe, and installer. The V2 contract is pinned to Cloud commit `e954904603b3467e30bbeaf7446977b61fbcb9ef`; its separate trusted-policy adoption must precede the consumer merge. Use these controls only from a reviewed, pinned, installed stock release. This validation does not establish installation, production activation, or live E3/E4 qualification; those remain separate release and evidence gates.
 
 ## Check current state
 
@@ -126,6 +126,6 @@ A `command_accepted` ACK means the stock CLI exited successfully and Gateway jou
 
 ## Evidence boundary
 
-The E1 stock Codex result is bounded client-interface evidence, not live Cloud delivery or a deployed route. Local Gateway tests establish persistence, fencing, duplicate, and ambiguous-recovery behavior under the tested cases. They do not prove E3 live idle wake or E4 canonical Messaging delivery/settlement; neither stage is declared complete here. The handoff and V2 recovery implementation exists in the unmerged integration source only; it is not an installed release or deployment qualification. Source/client evidence is not deployment evidence.
+The E1 stock Codex result is bounded client-interface evidence, not live Cloud delivery or a deployed route. Local Gateway tests establish persistence, fencing, duplicate, and ambiguous-recovery behavior under the tested cases. They do not prove E3 live idle wake or E4 canonical Messaging delivery/settlement; neither stage is declared complete here. The handoff and V2 recovery implementation and its tests do not establish an installed release or deployment qualification. Source/client evidence is not deployment evidence.
 
 Existing shared Messaging grants and wake-budget rules remain authoritative. This runbook introduces no new limits, budget service, retry permission, or authority. Remote Execution remains an optional Messaging-to-Execution handoff under its existing grants, approval, run lifecycle, limits, and cancellation; it is not an Event executor or a prerequisite for local wake. Memory remains governed by its existing grants and policies; event delivery creates no automatic memory writes.

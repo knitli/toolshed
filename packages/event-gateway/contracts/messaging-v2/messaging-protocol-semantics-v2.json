@@ -55,6 +55,72 @@
       "itemId": "018e2c70-7c6a-7a01-8000-000000000009"
     }
   },
+  "assigned_stock_envelope": {
+    "schemaVersion": 2,
+    "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+    "source": "messaging",
+    "canonicalSubject": {
+      "kind": "message",
+      "namespace": "team/inbox",
+      "messageId": "018e2c70-7c6a-7a01-8000-000000000002",
+      "agentIncarnation": 0
+    },
+    "eventKind": "message",
+    "reasonCode": "inbox_message",
+    "runtimeProfile": {
+      "profile": "assigned_stock_client",
+      "client": "codex",
+      "conversationId": "018e2c70-7c6a-7a01-8000-000000000010"
+    },
+    "sourceStateVersion": "msg:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "policyRevision": 1,
+    "observedAt": "2026-10-17T11:59:45.000Z",
+    "principal": "adam@knitli.com",
+    "agent": "pilot-agent",
+    "eventReference": "ref_018e2c70-7c6a-7a01-8000-000000000003",
+    "nodeId": "018e2c70-7c6a-7a01-8000-000000000004",
+    "runtimeId": "018e2c70-7c6a-7a01-8000-000000000005",
+    "nodeGeneration": 1,
+    "runtimeGeneration": 2,
+    "attachmentGeneration": 3,
+    "consumerGeneration": 3,
+    "routingGeneration": 4,
+    "attemptId": "018e2c70-7c6a-7a01-8000-000000000006",
+    "issuedAt": "2026-10-17T12:00:00.000Z",
+    "expiresAt": "2026-10-17T12:01:00.000Z",
+    "deliveryId": "dly_e9a5d8a2eff4001935940f60c13a891d75236119f80f8c7898f5718247771fe5"
+  },
+  "assigned_stock_command_accepted_ack": {
+    "schemaVersion": 2,
+    "deliveryId": "dly_e9a5d8a2eff4001935940f60c13a891d75236119f80f8c7898f5718247771fe5",
+    "attemptId": "018e2c70-7c6a-7a01-8000-000000000006",
+    "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
+    "principal": "adam@knitli.com",
+    "agent": "pilot-agent",
+    "nodeId": "018e2c70-7c6a-7a01-8000-000000000004",
+    "runtimeId": "018e2c70-7c6a-7a01-8000-000000000005",
+    "nodeGeneration": 1,
+    "runtimeGeneration": 2,
+    "attachmentGeneration": 3,
+    "consumerGeneration": 3,
+    "routingGeneration": 4,
+    "deliveredSourceStateVersion": "msg:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "acknowledgedAt": "2026-10-17T12:00:30.000Z",
+    "status": "command_accepted",
+    "runtimeProfile": {
+      "profile": "assigned_stock_client",
+      "client": "codex",
+      "conversationId": "018e2c70-7c6a-7a01-8000-000000000010"
+    },
+    "permitId": "018e2c70-7c6a-7a01-8000-000000000011"
+  },
+  "assigned_stock_mutations": {
+    "profile_mismatch": { "runtimeProfile": { "profile": "other_client", "client": "codex", "conversationId": "018e2c70-7c6a-7a01-8000-000000000010" } },
+    "conversation_mismatch": { "runtimeProfile": { "profile": "assigned_stock_client", "client": "codex", "conversationId": "018e2c70-7c6a-7a01-8000-000000000012" } },
+    "routing_generation_mismatch": { "routingGeneration": 5 },
+    "permit_invalid": { "permitId": "invalid" },
+    "native_correlation_present": { "nativeCorrelation": { "kind": "native_turn_started", "permitId": "018e2c70-7c6a-7a01-8000-000000000011", "turnId": "018e2c70-7c6a-7a01-8000-000000000013" } }
+  },
   "canonicalDeliveryIdentity": "[2,\"018e2c70-7c6a-7a01-8000-000000000001\",\"018e2c70-7c6a-7a01-8000-000000000004\",\"018e2c70-7c6a-7a01-8000-000000000005\",1,2,3,3,4]",
   "expectedDigest": "dly_e9a5d8a2eff4001935940f60c13a891d75236119f80f8c7898f5718247771fe5",
   "v1SemanticFixtureSha256": "9d34521788fcba40663bf0d1076747dc2c48b290126f25c0df510bbd670b50c5"

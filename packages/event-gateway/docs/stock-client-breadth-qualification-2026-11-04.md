@@ -1,6 +1,6 @@
 # Event alignment client breadth — 2026-11-04
 
-Scope: bounded interface audit for Claude Code and Muse Code. Gateway now has local Messaging v2 handoff/recovery implementation, but this document records only client breadth evidence; that implementation is unmerged/uninstalled and does not change any client disposition. No owner conversations, credentials, remote/paid inference, production routes, or client configuration changes were used for this audit.
+Scope: bounded interface audit for Claude Code and Muse Code. Gateway now has local Messaging v2 handoff/recovery implementation, but this document records only client breadth evidence; source implementation alone does not establish installation or change any client disposition. No owner conversations, credentials, remote/paid inference, production routes, or client configuration changes were used for this audit.
 
 | Client | Candidate input seam | Evidence from isolated trial | E5 disposition |
 |---|---|---|---|
