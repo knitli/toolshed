@@ -3,6 +3,7 @@
 from pathlib import Path
 import errno
 from contextlib import redirect_stdout
+from contextlib import redirect_stderr
 import io
 import os
 import socket
@@ -21,10 +22,12 @@ from prepare_stock_codex_pilot import (  # noqa: E402
     HELD_PROMPT,
     MAX_CONTROL_BYTES,
     PilotFixture,
+    PilotProvider,
     SESSION_A,
     SESSION_B,
     _owned_daemon_socket,
     _stop_owned_updater,
+    main,
     _request_record,
     _pop_control_line,
     pilot_evidence,
@@ -57,6 +60,61 @@ def _evidence_inputs():
 
 
 class PilotEvidenceTests(unittest.TestCase):
+    def test_linux_is_rejected_before_fixture_construction(self):
+        fixture = Mock()
+        fixture.stop.return_value = {"clean": True}
+        with patch("prepare_stock_codex_pilot.sys.platform", "linux"), \
+                patch("prepare_stock_codex_pilot.sys.argv", ["fixture", "--binary", "/unused"]), \
+                patch("prepare_stock_codex_pilot.PilotFixture", return_value=fixture) as constructor, \
+                redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit):
+            main()
+        constructor.assert_not_called()
+
+    def test_response_event_is_recorded_before_followup_request_can_acquire_lock(self):
+        provider = PilotProvider.__new__(PilotProvider)
+        provider.lock = threading.Lock()
+        provider.events = []
+        write_entered = threading.Event()
+        finish_write = threading.Event()
+        followup_started = threading.Event()
+
+        class PausedWriter:
+            def write(self, _body):
+                write_entered.set()
+                if not finish_write.wait(2):
+                    raise TimeoutError("test writer release timeout")
+
+            def flush(self):
+                pass
+
+        response = threading.Thread(target=provider._write_response,
+                                    args=(PausedWriter(), b"response", 1))
+        response.start()
+        self.assertTrue(write_entered.wait(1))
+        lock_available_during_write = provider.lock.acquire(blocking=False)
+        if lock_available_during_write:
+            provider.lock.release()
+
+        def record_followup():
+            followup_started.set()
+            with provider.lock:
+                provider.events.append({"event": "request", "number": 2})
+
+        followup = threading.Thread(target=record_followup)
+        followup.start()
+        self.assertTrue(followup_started.wait(1))
+        finish_write.set()
+        response.join(timeout=2)
+        followup.join(timeout=2)
+        self.assertFalse(response.is_alive())
+        self.assertFalse(followup.is_alive())
+        self.assertFalse(lock_available_during_write)
+        self.assertEqual(provider.events, [
+            {"event": "response_written", "number": 1},
+            {"event": "request", "number": 2},
+        ])
+
     def test_constructor_keyboard_interrupt_runs_cleanup_and_reraises(self):
         with tempfile.TemporaryDirectory(prefix="e3-interrupt-") as directory:
             binary = Path(directory) / "codex"

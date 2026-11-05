@@ -156,17 +156,22 @@ class PilotProvider(http.server.ThreadingHTTPServer):
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                try:
-                    self.wfile.write(body)
-                    self.wfile.flush()
-                except OSError:
+                if not provider._write_response(self.wfile, body, number):
                     return
-                with provider.lock:
-                    provider.events.append({"event": "response_written", "number": number})
                 if held:
                     provider.held_response_written.set()
 
         super().__init__(address, Handler)
+
+    def _write_response(self, writer, body, number):
+        try:
+            with self.lock:
+                writer.write(body)
+                writer.flush()
+                self.events.append({"event": "response_written", "number": number})
+        except OSError:
+            return False
+        return True
 
 
 def pilot_evidence(requests, events, idle_reference, busy_reference, baseline=0):
@@ -474,6 +479,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     args = parser.parse_args()
+    if sys.platform != "darwin":
+        parser.error("the local Codex pilot fixture requires macOS")
     fixture = None
     exit_code = 0
     try:
