@@ -1,0 +1,78 @@
+{
+  "acceptedCommands": {
+    "queueAWhileBOpen": {
+      "exit": 0,
+      "queuedMessageId": "01a1a8d8-47fa-71c2-8d78-3104c7c86090",
+      "threadId": "01a1a8d8-364a-7a82-9f31-66eb939c0efa"
+    },
+    "queueAWithTuiClosed": {
+      "exit": 0,
+      "queuedMessageId": "01a1a8d8-546b-7620-ab77-6194f1e7f4d5",
+      "threadId": "01a1a8d8-364a-7a82-9f31-66eb939c0efa"
+    }
+  },
+  "checks": {
+    "BStayedIdle": true,
+    "BStillOpen": true,
+    "closedTuiDaemonResume": true,
+    "crossSessionTargetedA": true,
+    "daemonAfterTuiExit": "running",
+    "duplicateAcceptedSeparately": true,
+    "queueAWhileBOpenTargetsExactUUID": true,
+    "queueAWithTuiClosedTargetsExactUUID": true,
+    "reopenCausedNoNewProviderRequestFromBeforeTuiStartThroughOneSecondObservation": true,
+    "reopenedA": true
+  },
+  "codex": {
+    "sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1",
+    "version": "codex-cli 0.166.0"
+  },
+  "crossSessionObservation": {
+    "providerRequestBaselineBeforeOpeningB": 2,
+    "targetARequestExcludesBSeed": true,
+    "targetARequestIncludesASeed": true,
+    "targetARequestNumber": 3,
+    "targetARequestSyntheticReferences": [
+      "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    ]
+  },
+  "daemonCleanup": {
+    "exit": 0,
+    "status": "stopped"
+  },
+  "duplicateAcceptance": {
+    "first": {
+      "queuedMessageId": "01a1a8d8-61d0-7531-b40a-f3943746f441",
+      "threadId": "01a1a8d8-6020-7470-b478-a89f662ff90d"
+    },
+    "reference": "ref_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "second": {
+      "queuedMessageId": "01a1a8d8-61e4-7c32-87e0-a877281fb685",
+      "threadId": "01a1a8d8-6020-7470-b478-a89f662ff90d"
+    }
+  },
+  "loopbackRequestsContainingReferences": [
+    {
+      "ASeed": true,
+      "BSeed": false,
+      "number": 3,
+      "syntheticReferences": [
+        "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+      ]
+    },
+    {
+      "ASeed": true,
+      "BSeed": false,
+      "number": 4,
+      "syntheticReferences": [
+        "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "ref_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+      ]
+    }
+  ],
+  "scope": "Disposable private CODEX_HOME; loopback-only synthetic provider; prompt/config payloads omitted.",
+  "sessions": {
+    "A": "01a1a8d8-364a-7a82-9f31-66eb939c0efa",
+    "B": "01a1a8d8-37b8-7902-b370-25b61a449a8b"
+  }
+}

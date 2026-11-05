@@ -1,0 +1,16 @@
+{
+  "capturedTuiExcerptFromQueuedReferenceToResponse": "ref_55555555-5555-4555-8555-555555555555\r\n\u2022 Working (0s \u2022 esc to interrupt)\r\n\r\n\u2022 synthetic response",
+  "codex": {
+    "sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1",
+    "version": "codex-cli 0.166.0"
+  },
+  "followupProviderSeenAfterQueue": true,
+  "heldTurnReachedSyntheticProvider": true,
+  "qualificationLimit": "Observation from the standalone trace only; E3 active-busy proof remains required.",
+  "queueCommandExit": 0,
+  "queueTargetThreadId": "01a1a8aa-496e-7d91-90cd-00e5f8d5dc94",
+  "queuedMessageId": "01a1a8aa-5d59-7251-a872-a2b4e227590e",
+  "scope": "Supporting summary of one successful standalone active-turn trace; no reproducible source for this exact raw run was found. The one-shot argv-prompt reproduction attempt did not reach the provider within 10 seconds. Raw logs/config/prompts are not committed.",
+  "threadId": "01a1a8aa-496e-7d91-90cd-00e5f8d5dc94",
+  "tuiStillRunningAfterFollowup": true
+}

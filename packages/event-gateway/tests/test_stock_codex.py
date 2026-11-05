@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
 import sqlite3
+import subprocess  # nosec B404 -- Executes only the private fixed warning fixture below.
 import tempfile
 from threading import Event
 import unittest
@@ -53,10 +54,22 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spawn.await_count, 1)
         self.assertEqual(spawn.call_args.args,
                          (str(self.binary), "queue", "--thread", THREAD,
-                          "--message", REFERENCE))
+                          "--message", REFERENCE, "--resume"))
         self.assertEqual(spawn.call_args.kwargs["stdin"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stdout"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stderr"], asyncio.subprocess.DEVNULL)
+
+    async def test_exit_zero_with_resume_warning_still_means_command_acceptance_only(self):
+        warning_binary = self.binary
+        warning_binary.write_text("#!/bin/sh\nprintf '%s\\n' 'Warning: failed to resume thread' >&2\nexit 0\n")
+        warning_binary.chmod(0o700)
+        emitted = subprocess.run(  # nosec B603 -- Test-owned fixed script, no shell or external input.
+            [str(warning_binary)], text=True, capture_output=True, check=True)
+        self.assertIn("Warning: failed to resume thread", emitted.stderr)
+
+        result = await StockCodexAdapter(THREAD, str(warning_binary)).submit(REFERENCE)
+
+        self.assertEqual(result, {"status": "command_accepted"})
 
     async def test_missing_binary_is_a_safe_no_start_without_spawn_attempt(self):
         with tempfile.TemporaryDirectory() as directory:

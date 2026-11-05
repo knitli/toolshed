@@ -1,0 +1,21 @@
+{
+  "codex": {
+    "sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1",
+    "version": "codex-cli 0.166.0"
+  },
+  "idleWakeProviderRequestObserved": true,
+  "qualificationLimit": "Standalone result only; reproducible matrix verifies queue acceptance and provider request, but not TUI rendering.",
+  "queue": {
+    "queuedMessageId": "01a1a8a9-9b15-70b2-ada2-14780e3e4c84",
+    "threadId": "01a1a8a9-8b8b-7112-8cd3-d9f0ca313b63"
+  },
+  "queueCommandExit": 0,
+  "reopenLoadedSameThread": true,
+  "requestCountAfterQueue": 2,
+  "requestCountAfterReopen": 2,
+  "requestCountBeforeQueue": 1,
+  "scope": "Supporting standalone idle-TUI trace; raw prompt/config/provider payloads are not committed.",
+  "threadId": "01a1a8a9-8b8b-7112-8cd3-d9f0ca313b63",
+  "tuiExcerptShowsReferenceAndResponse": true,
+  "tuiWasOpenWhenQueued": true
+}

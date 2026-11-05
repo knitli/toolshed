@@ -1,0 +1,77 @@
+{
+  "codex": {
+    "version": "codex-cli 0.166.0",
+    "sha256": "39acf979729dd290f9a24ee38b2914e036c91b65952872e28ae2a6b88a7db7c1"
+  },
+  "connection": {
+    "daemon": "private CODEX_HOME app-server daemon",
+    "tui": "codex resume --remote unix://<daemon socket>",
+    "queue": "codex queue --thread <A UUID> --message <ref> --resume",
+    "queueUsesDefaultLocalDaemonSelector": true,
+    "privateUnixSocketPresent": true
+  },
+  "heldTurn": {
+    "request": 3,
+    "heldResponseIdSha256": "c2bf8db0e2b7aa1e",
+    "queueExit": 0,
+    "queueTargetsExactAUuid": true,
+    "queueAcceptedElapsedSeconds": 5.823,
+    "extraRequest": {
+      "number": 4,
+      "elapsedSeconds": 5.834,
+      "requestBodySha256": "675169c515470ee6ff42f07d1140075bf2acc96605ce1d234c44e6be9ce73a4a",
+      "purpose": "Codex background title generation for the original busy-turn prompt",
+      "model": "synthetic",
+      "stream": true,
+      "previousResponseIdPresent": false,
+      "rolesAndTypes": [
+        {"role": "developer", "type": "message", "contentTypes": ["input_text"]},
+        {"role": "developer", "type": "message", "contentTypes": ["input_text"]},
+        {"role": "user", "type": "message", "contentTypes": ["input_text"]},
+        {"role": "user", "type": "message", "contentTypes": ["input_text"]}
+      ],
+      "containsQueuedReference": false,
+      "containsHeldAssistantResponse": false,
+      "classificationBasis": "Mode-0600 private request body inspected locally; only purpose, role/type shape and whole-body hash retained here."
+    },
+    "heldResponseStreamCompletedElapsedSeconds": 6.329,
+    "queuedFollowupRequest": {
+      "number": 5,
+      "elapsedSeconds": 6.338,
+      "previousResponseIdPresent": false,
+      "containsExactASeed": true,
+      "containsHeldPrompt": true,
+      "containsUniqueQueuedReference": true,
+      "containsExactHeldAssistantText": true,
+      "syntheticHeldResponseIdSha256": "c2bf8db0e2b7aa1e"
+    },
+    "sessionBStayedIdle": true,
+    "providerWriteErrors": [],
+    "noClassifiedQueuedFollowupBeforeHeldResponseCompleted": true
+  },
+  "clientVisibleEvidence": {
+    "workingVisibleAtQueueAcceptance": true,
+    "originalPromptVisibleAtQueueAcceptance": false,
+    "queuedReferenceVisibleAtQueueAcceptance": false,
+    "heldResponseVisibleBeforeFollowupCompletion": true,
+    "tuiWorkingBeforeFollowupResponse": true,
+    "queuedReferenceVisibleBeforeFollowupCompletion": false,
+    "orderedTuiExcerptProvedCompletionAndFollowup": false,
+    "explicitCancellationSignalObserved": false
+  },
+  "cleanup": {
+    "ptyDrainsStoppedWithin2Seconds": true,
+    "bothTuiChildrenKilledAndReapedWithin3Seconds": true,
+    "bothPtyMasterDescriptorsClosed": true,
+    "daemonStopExit": 0,
+    "daemonStatus": "stopped",
+    "daemonStopTimeoutSeconds": 15
+  },
+  "rawHarnessVerdict": {
+    "passed": false,
+    "reason": "The original V6 harness required the external queued reference to render in the TUI and its ordered-excerpt parser to find it. Those are stricter than the plan's no-interruption gate; the raw result is preserved unchanged at /private/tmp/codex-stock-e1-busy-remote-v6.json."
+  },
+  "reviewedCoreQualification": "bounded_pass_for_documented_daemon_connected_tui_mode",
+  "result": "The held response completed and appeared in the still-Working TUI before the queued followup response completed; the later exact-A provider input contains the unique queued ref and exact held assistant text. Request #4 is classified title-generation work. The queued ref itself was not visible in the TUI. Default embedded-TUI routing remains unqualified.",
+  "scope": "One bounded synthetic loopback trial. Private CODEX_HOME, no inherited credentials, no owner sessions, no paid provider. No prompt/config/raw terminal content retained in this evidence file."
+}

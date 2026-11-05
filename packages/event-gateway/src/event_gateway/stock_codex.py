@@ -81,7 +81,7 @@ class StockCodexAdapter:
         try:
             process = await asyncio.create_subprocess_exec(
                 self.binary, "queue", "--thread", self.conversation_id,
-                "--message", event_reference,
+                "--message", event_reference, "--resume",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
