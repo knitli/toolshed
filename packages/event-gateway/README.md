@@ -215,8 +215,11 @@ are refused with `native_binding_unqualified`.
 
 GitHub watch publication can materialize local deliveries, but automatic wake
 and dispatch remain default-off until explicitly configured and qualified. A
-delivery carries an opaque `ref_*` event reference, not provider text; the
-protected metadata reader resolves it under current authority. Messaging v2
+GitHub delivery carries an opaque `ref_*` event reference, not provider text;
+the protected metadata reader resolves it under current authority. A Messaging
+v2 stock notification also supplies its canonical message ID for the client's
+existing Messaging MCP `read` tool. That client must already be authenticated
+as the assigned agent; the ID grants no access. Messaging v2
 delivery and live pilot activation remain disabled/unqualified. The assigned-stock
 path durably records command acceptance. The shared Messaging authority settles
 that receipt or a proven no-start before allowing a fresh wake; uncertain

@@ -83,6 +83,8 @@ knitli-event-gateway --state-dir "<PRIVATE_STATE_DIR>" stock-control renew \
 
 The operation renews the exact cloud stock assignment, checks the readback against that assignment, and asks the single local writer to store the Messaging mapping with the expected prior mapping. A successful CLI result reports `localMapping: stored`; this proves the local write returned successfully, not independent remote route authority or E4 event delivery. If the outcome is ambiguous or the result reports `cloud_committed_local_mapping_failed`, stop and reconcile the exact generations with the route owner before another operation. Do not replace the file with guessed values or retry under a new assignment.
 
+For canonical content reads, configure the assigned client's existing Messaging MCP connection as the same principal and agent. Messaging stock notifications include the canonical message ID and ask the client to call `read` with that ID; the opaque event reference is not a message ID. The tool still enforces current mailbox access and provenance. Queue acceptance does not prove the read happened.
+
 ## Stop future submissions
 
 Stop the Gateway daemon through its existing foreground/supervisor lifecycle: Ctrl-C for a foreground `run`, or the supervisor's normal stop/SIGTERM for its exact process. There is no separate `pause` or `stop` CLI subcommand. Then fence the local runtime mapping:

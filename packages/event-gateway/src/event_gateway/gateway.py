@@ -487,7 +487,14 @@ class Gateway:
             self.store.begin_stock_submit(delivery_id, envelope["attemptId"])
 
         try:
-            await adapter.submit(envelope["eventReference"], before_start=fence_stock_submission)
+            if envelope.get("schemaVersion") == 2:
+                await adapter.submit(
+                    envelope["eventReference"],
+                    canonical_message_id=envelope["canonicalSubject"]["messageId"],
+                    before_start=fence_stock_submission,
+                )
+            else:
+                await adapter.submit(envelope["eventReference"], before_start=fence_stock_submission)
         except StockCodexPreflightCancelled:
             try:
                 self.store.begin_settlement(

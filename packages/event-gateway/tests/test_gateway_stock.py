@@ -128,7 +128,7 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
 
     def stock_submit_mock(self, *, result=None, error=None):
         """Model a successful preflight, then run the gateway's synchronous fence."""
-        async def submit(event_reference, *, before_start=None):
+        async def submit(event_reference, *, canonical_message_id=None, before_start=None):
             if isinstance(error, (StockCodexPreflightCancelled,)) or (
                     isinstance(error, StockCodexError) and error.code == "client_not_started"):
                 raise error
@@ -143,6 +143,11 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
     def assert_stock_submit_once(self, submit):
         self.assertEqual(submit.await_count, 1)
         self.assertEqual(submit.await_args.args, (self.event["eventReference"],))
+        if self.event.get("schemaVersion") == 2:
+            self.assertEqual(submit.await_args.kwargs["canonical_message_id"],
+                             self.event["canonicalSubject"]["messageId"])
+        else:
+            self.assertNotIn("canonical_message_id", submit.await_args.kwargs)
         self.assertIn("before_start", submit.await_args.kwargs)
 
     def setup_messaging_v2_stock(self):
