@@ -226,6 +226,9 @@ The stock Codex path is opt-in and names an existing canonical conversation UUID
 it never discovers or selects a latest thread. Reuse the private cloud config and
 node key below. First assignment creates generation 1:
 
+For the operator procedure, exact owner handoff, ambiguous recovery, and client
+support evidence, see the [stock client operations runbook](docs/stock-client-operations-2026-11-04.md).
+
 ```sh
 knitli-event-gateway stock-control attach \
   --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \

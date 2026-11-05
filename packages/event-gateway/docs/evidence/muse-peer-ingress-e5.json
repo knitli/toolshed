@@ -1,0 +1,31 @@
+{
+  "client": {
+    "name": "Muse Code",
+    "version": "Muse Code 1.4.14 (1.4.14-R7309.1)"
+  },
+  "officialDocs": "https://dev.meta.ai/docs/muse-code/session-messaging",
+  "installedHelp": {
+    "commands": [
+      "muse session-message --help",
+      "muse session-message list --help",
+      "muse session-message send --help"
+    ],
+    "list": "muse session-message list [--json]",
+    "send": "muse session-message send --target <session-uuid-or-name> [--in-reply-to <reply-token>] [--display-context <json>] [--json] < body"
+  },
+  "probe": {
+    "setup": "A temporary HOME and workspace were created under the audit directory. HOME and XDG_CONFIG_HOME/XDG_DATA_HOME/XDG_STATE_HOME pointed inside it; PATH was /usr/bin:/bin. An interactive TUI ran with --provider echo --disable-shell --disable-write and the temporary workspace.",
+    "command": "muse session-message list --json",
+    "tuiAliveAtList": true,
+    "exitCode": 1,
+    "stdout": "{\"schema_version\":1,\"status\":\"unavailable\",\"error_code\":\"external_agent_ingress_closed\"}\n",
+    "stderr": "external agent ingress is unavailable\n",
+    "messageSent": false,
+    "bypassAttempted": false,
+    "cleanup": "Sent SIGINT; TUI exited within four seconds. Temporary HOME and workspace were removed.",
+    "inference": "Echo provider only; no remote or paid inference.",
+    "result": "Documented same-user peer UUID ingress exists, but installed external-agent ingress was unavailable. No peer receipt was qualified."
+  },
+  "ambientInvocationCaveat": "Initial muse --version and muse --help identification ran before HOME isolation. They only printed version/help; no login, message, provider inference, or configuration write was performed or observed.",
+  "scope": "Read-only client audit; no Gateway adapter, production route, or configuration change."
+}
