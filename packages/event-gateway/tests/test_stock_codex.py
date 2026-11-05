@@ -1,7 +1,7 @@
 import asyncio
 from pathlib import Path
 import sqlite3
-import subprocess
+import subprocess  # nosec B404 -- Executes only the private fixed warning fixture below.
 import tempfile
 from threading import Event
 import unittest
@@ -63,7 +63,8 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
         warning_binary = self.binary
         warning_binary.write_text("#!/bin/sh\nprintf '%s\\n' 'Warning: failed to resume thread' >&2\nexit 0\n")
         warning_binary.chmod(0o700)
-        emitted = subprocess.run([str(warning_binary)], text=True, capture_output=True, check=True)
+        emitted = subprocess.run(  # nosec B603 -- Test-owned fixed script, no shell or external input.
+            [str(warning_binary)], text=True, capture_output=True, check=True)
         self.assertIn("Warning: failed to resume thread", emitted.stderr)
 
         result = await StockCodexAdapter(THREAD, str(warning_binary)).submit(REFERENCE)

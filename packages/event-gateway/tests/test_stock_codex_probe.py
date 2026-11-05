@@ -9,7 +9,7 @@ import io
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-import subprocess
+import subprocess  # nosec B404 -- Only mocked process errors and TimeoutExpired fixtures.
 from unittest.mock import Mock
 from unittest.mock import patch
 
