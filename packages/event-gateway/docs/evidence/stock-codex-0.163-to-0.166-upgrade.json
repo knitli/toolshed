@@ -27,10 +27,10 @@
     "exactPriorUUIDTarget": true,
     "exit": 0,
     "matchingLoopbackRequestNumber": 2,
-    "queuedMessageId": "01a1a8c7-19e3-7422-831a-5ebbf21069e5",
+    "queuedMessageId": "01a1a8d8-9092-7b71-92e6-ad703df97569",
     "sameThreadResumedAfterUpgrade": true,
     "syntheticReference": "ref_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-    "threadId": "01a1a8c7-0d88-7393-aae1-0390682a943f"
+    "threadId": "01a1a8d8-8464-7e11-a754-3fe4cc3ee9f2"
   },
   "sameHomeTransition": {
     "currentDaemonStarted": "started",
@@ -44,7 +44,7 @@
     "previousDaemonStarted": "started",
     "previousDaemonStopExit": 0,
     "previousDaemonStopStatus": "stopped",
-    "threadId": "01a1a8c7-0d88-7393-aae1-0390682a943f"
+    "threadId": "01a1a8d8-8464-7e11-a754-3fe4cc3ee9f2"
   },
   "scope": "One disposable CODEX_HOME, seeded by official 0.163.0 CLI and resumed by installed 0.166.0 CLI against loopback-only synthetic provider. Prompts/config payloads omitted."
 }

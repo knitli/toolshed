@@ -18,8 +18,8 @@ import threading
 import time
 
 
-def _response_events(number):
-    item_id, response_id, text = f"msg_{number}", f"resp_{number}", "synthetic response"
+def _response_events(number, response_text="synthetic response"):
+    item_id, response_id, text = f"msg_{number}", f"resp_{number}", response_text
     item = {"id": item_id, "type": "message", "role": "assistant",
             "status": "completed", "content": [{"type": "output_text", "text": text,
                                                         "annotations": []}]}
@@ -105,6 +105,25 @@ def _wait_for(provider, predicate, after=0, timeout=15):
     return None
 
 
+def _provider_request_count(provider):
+    with provider.lock:
+        return len(provider.requests)
+
+
+def _provider_requests_since(provider, baseline):
+    with provider.lock:
+        return list(provider.requests[baseline:])
+
+
+def _has_session_marker(request, marker):
+    return marker in request.get("synthetic_user_text", [])
+
+
+def _targets_session(request, reference, expected_marker, forbidden_marker):
+    texts = request.get("synthetic_user_text", [])
+    return reference in texts and expected_marker in texts and forbidden_marker not in texts
+
+
 def _tui(binary, home, thread_id):
     master, slave = pty.openpty()
     import fcntl
@@ -116,6 +135,12 @@ def _tui(binary, home, thread_id):
     os.close(slave)
     time.sleep(1.25)
     return process, master
+
+
+def _open_tui_with_baseline(provider, binary, home, thread_id):
+    baseline = _provider_request_count(provider)
+    process, master = _tui(binary, home, thread_id)
+    return process, master, baseline
 
 
 def _stop_tui(process, master):
@@ -191,18 +216,29 @@ def qualify(binary):
                 raise RuntimeError("private_daemon_start_failed")
             result["daemonStart"] = json.loads(daemon.stdout)
 
-            tui_b, pty_b = _tui(binary, home, thread_b)
+            session_a_marker = "Seed synthetic session A."
+            session_b_marker = "Seed synthetic session B."
+            tui_b, pty_b, cross_session_baseline = _open_tui_with_baseline(
+                probe, binary, home, thread_b)
             tuis.append((tui_b, pty_b))
-            result["requestsBeforeCrossSessionQueue"] = len(probe.requests)
+            result["requestsBeforeCrossSessionTui"] = cross_session_baseline
             first_ref = "ref_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
             queued = _cli(binary, home, "queue", "--thread", thread_a, "--message", first_ref, "--resume")
             result["queueAWhileBOpen"] = {"exit": queued.returncode, "output": queued.stdout.strip()}
             result["queueAWhileBOpenTargetsExactUUID"] = _queue_targets(queued, thread_a)
-            first = _wait_for(probe, lambda row: first_ref in row["synthetic_user_text"],
-                              result["requestsBeforeCrossSessionQueue"])
+            first = _wait_for(
+                probe,
+                lambda row: _targets_session(row, first_ref, session_a_marker, session_b_marker),
+                cross_session_baseline,
+            )
             result["crossSessionTargetedA"] = first is not None
             result["BStillOpen"] = tui_b.poll() is None
-            if not first or not result["queueAWhileBOpenTargetsExactUUID"] or not result["BStillOpen"]:
+            time.sleep(0.5)
+            post_cross_session_requests = _provider_requests_since(probe, cross_session_baseline)
+            result["BStayedIdle"] = not any(
+                _has_session_marker(row, session_b_marker) for row in post_cross_session_requests)
+            if (not first or not result["queueAWhileBOpenTargetsExactUUID"]
+                    or not result["BStillOpen"] or not result["BStayedIdle"]):
                 raise RuntimeError("explicit_session_queue_not_observed")
             result["responseForA"] = first
             result["BExit"] = _stop_tui(tui_b, pty_b)
@@ -218,21 +254,25 @@ def qualify(binary):
                           "--message", second_ref, "--resume")
             result["queueAWithTuiClosed"] = {"exit": queued.returncode, "output": queued.stdout.strip()}
             result["queueAWithTuiClosedTargetsExactUUID"] = _queue_targets(queued, thread_a)
-            second = _wait_for(probe, lambda row: second_ref in row["synthetic_user_text"],
-                               before_closed_queue)
+            second = _wait_for(
+                probe,
+                lambda row: _targets_session(row, second_ref, session_a_marker, session_b_marker),
+                before_closed_queue,
+            )
             result["closedTuiDaemonResume"] = second is not None
             if (not second or not result["queueAWithTuiClosedTargetsExactUUID"]
                     or result["daemonAfterTuiExit"] != "running"):
                 raise RuntimeError("closed_tui_daemon_resume_unproved")
 
-            tui_a, pty_a = _tui(binary, home, thread_a)
+            tui_a, pty_a, reopen_baseline = _open_tui_with_baseline(
+                probe, binary, home, thread_a)
             tuis.append((tui_a, pty_a))
             result["reopenedA"] = tui_a.poll() is None
             if not result["reopenedA"]:
                 raise RuntimeError("same_uuid_tui_reopen_not_observed")
-            result["reopenRequestCount"] = len(probe.requests)
+            result["reopenRequestCount"] = reopen_baseline
             time.sleep(1)
-            result["postReopenRequestCount"] = len(probe.requests)
+            result["postReopenRequestCount"] = _provider_request_count(probe)
             result["reopenCausedNoNewProviderRequest"] = (
                 result["reopenRequestCount"] == result["postReopenRequestCount"])
             if not result["reopenCausedNoNewProviderRequest"]:
