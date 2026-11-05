@@ -53,7 +53,7 @@ def _binary_is_executable(binary_path):
 
 
 class StockCodexAdapter:
-    """Queue one opaque event reference in one explicitly assigned conversation."""
+    """Queue an event reference or canonical Messaging selector in one assigned conversation."""
 
     def __init__(self, conversation_id, binary):
         """Bind the adapter to one conversation and CLI binary."""
@@ -63,10 +63,12 @@ class StockCodexAdapter:
         self.conversation_id, self.binary = conversation_id, binary
 
     # Keep final fencing, process creation and ambiguous-outcome cleanup in one sequence.
-    async def submit(self, event_reference, *, before_start=None):  # noqa: MC0001
-        """Preflight, synchronously fence, and then queue one opaque reference."""
+    async def submit(self, event_reference, *, canonical_message_id=None, before_start=None):  # noqa: MC0001
+        """Preflight, synchronously fence, and then queue one reference or canonical message selector."""
         if type(event_reference) is not str or not _REFERENCE.fullmatch(event_reference):  # pylint: disable=unidiomatic-typecheck
             raise StockCodexError("invalid_event_reference")
+        if canonical_message_id is not None and not _canonical_uuid(canonical_message_id):
+            raise StockCodexError("invalid_message_id")
         try:
             executable = await asyncio.to_thread(_binary_is_executable, self.binary)
         except asyncio.CancelledError:
@@ -78,10 +80,15 @@ class StockCodexAdapter:
                 before_start()
             except Exception as exc:
                 raise StockCodexStartFenceError(exc) from None
+        message = event_reference if canonical_message_id is None else (
+            f"Messaging event reference: {event_reference}\n"
+            f"Canonical message ID: {canonical_message_id}\n"
+            "Use the existing Messaging MCP read tool to read this message by ID under your current permissions."
+        )
         try:
             process = await asyncio.create_subprocess_exec(
                 self.binary, "queue", "--thread", self.conversation_id,
-                "--message", event_reference, "--resume",
+                "--message", message, "--resume",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,

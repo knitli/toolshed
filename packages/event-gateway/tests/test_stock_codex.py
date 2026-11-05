@@ -33,6 +33,9 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
         for value in (None, "", REFERENCE + "x", "ref_" + str(uuid.uuid4()).upper()):
             with self.subTest(value=value), self.assertRaisesRegex(StockCodexError, "invalid_event_reference"):
                 asyncio.run(adapter.submit(value))
+        for value in ("", THREAD.upper(), "abcdefab-cdef-3abc-8def-abcdefabcdef"):
+            with self.subTest(message_id=value), self.assertRaisesRegex(StockCodexError, "invalid_message_id"):
+                asyncio.run(adapter.submit(REFERENCE, canonical_message_id=value))
 
     async def test_uses_stock_cli_exact_thread_and_returns_only_command_acceptance(self):
         process = type("Process", (), {"wait": AsyncMock(return_value=0)})()
@@ -58,6 +61,20 @@ class StockCodexTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(spawn.call_args.kwargs["stdin"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stdout"], asyncio.subprocess.DEVNULL)
         self.assertEqual(spawn.call_args.kwargs["stderr"], asyncio.subprocess.DEVNULL)
+
+    async def test_messaging_prompt_selects_canonical_message_for_existing_mcp_read(self):
+        process = type("Process", (), {"wait": AsyncMock(return_value=0)})()
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
+            await StockCodexAdapter(THREAD, str(self.binary)).submit(
+                REFERENCE, canonical_message_id=THREAD)
+        args = spawn.call_args.args
+        self.assertEqual(args[:5], (str(self.binary), "queue", "--thread", THREAD, "--message"))
+        self.assertEqual(args[6:], ("--resume",))
+        self.assertEqual(args[5], (
+            f"Messaging event reference: {REFERENCE}\n"
+            f"Canonical message ID: {THREAD}\n"
+            "Use the existing Messaging MCP read tool to read this message by ID under your current permissions."
+        ))
 
     async def test_exit_zero_with_resume_warning_still_means_command_acceptance_only(self):
         warning_binary = self.binary
