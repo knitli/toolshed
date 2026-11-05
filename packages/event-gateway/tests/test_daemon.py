@@ -172,6 +172,86 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                     daemon._execute_control_command(store, command)
                 self.assertIsNone(store.get_attachment(runtime_id))
 
+    async def test_repeated_messaging_handoff_max_unicode_namespaces_fit_control_socket(self):
+        now = time.time()
+        runtime_id, node_id, conversation_id = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+        namespaces = ("📨" * 256, "\ud800" * 256)
+        principal = "a" * 64 + "@" + "a" * 63 + "." + "a" * 63 + "." + "a" * 61
+        max_generation = 2**53 - 1
+        self.assertEqual(len(principal), 254)
+        stock_mapping = {
+            "runtimeId": runtime_id, "principal": principal, "agent": "a" * 32,
+            "nodeId": node_id, "nodeGeneration": max_generation,
+            "runtimeGeneration": max_generation, "attachmentGeneration": max_generation,
+            "consumerGeneration": max_generation,
+            "leaseExpiresAt": now + 30,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                               "conversationId": conversation_id},
+        }
+        captured = []
+        open_unix_connection = asyncio.open_unix_connection
+
+        class CapturingWriter:
+            def __init__(self, writer):
+                self.writer = writer
+
+            def write(self, data):
+                captured.append(data)
+                self.writer.write(data)
+
+            def __getattr__(self, name):
+                return getattr(self.writer, name)
+
+        async def open_capturing_connection(*args, **kwargs):
+            reader, writer = await open_unix_connection(*args, **kwargs)
+            return reader, CapturingWriter(writer)
+
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            with patch.object(daemon.asyncio, "open_unix_connection",
+                              side_effect=open_capturing_connection):
+                for index, namespace in enumerate(namespaces):
+                    state = await self.state_dir(directory, f"unicode-messaging-handoff-{index}")
+                    with Store(state) as store:
+                        store.put_attachment(stock_mapping)
+                    first_mapping = {
+                        **stock_mapping, "namespace": namespace,
+                        "agentIncarnation": max_generation, "routingGeneration": max_generation,
+                        "leaseExpiresAt": now + 90,
+                    }
+                    second_mapping = {**first_mapping, "leaseExpiresAt": now + 120}
+                    async with running_daemon(state):
+                        first = await daemon.request(state, {
+                            "command": "put-messaging-attachment", "mapping": first_mapping,
+                            "expectedMapping": stock_mapping,
+                        })
+                        second = await daemon.request(state, {
+                            "command": "put-messaging-attachment", "mapping": second_mapping,
+                            "expectedMapping": first_mapping,
+                        })
+                    with Store(state) as store:
+                        self.assertEqual(store.get_attachment(runtime_id), second_mapping)
+                    self.assertEqual(first, {"stored": True, "runtimeId": runtime_id})
+                    self.assertEqual(second, {"stored": True, "runtimeId": runtime_id})
+
+        self.assertEqual(len(captured), 4)
+        for request_bytes in captured:
+            self.assertTrue(request_bytes.endswith(b"\n"))
+            self.assertLessEqual(len(request_bytes), 8192)
+        self.assertTrue(all("📨".encode("utf-8") in request for request in captured[:2]))
+        self.assertTrue(all(b"\\ud800" in request for request in captured[2:]))
+        # Two maximum-sized valid Messaging mappings exceed the HTTP envelope cap,
+        # but the bounded control socket frame carries their CAS tuple.
+        self.assertGreater(max(map(len, captured)), 4096)
+        self.assertLess(max(map(len, captured)), 8192)
+
+    async def test_oversized_control_request_is_rejected_before_connecting(self):
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory:
+            state = await self.state_dir(directory, "oversized-control")
+            with patch.object(daemon.asyncio, "open_unix_connection") as connect:
+                with self.assertRaisesRegex(ValueError, "^request_too_large$"):
+                    await daemon.request(state, {"command": "x" * 8192})
+            connect.assert_not_called()
+
     async def test_stock_renew_control_uses_exact_cas_for_expired_local_record(self):
         now = [100]
         mapping = {

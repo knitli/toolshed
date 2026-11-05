@@ -267,6 +267,88 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.authority.acks, [])
         self.assertEqual(self.authority.settlements, [])
 
+    async def test_v2_claim_refusal_survives_detach_for_capacity_and_retention(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        refusal = CloudError("denied", definitive_refusal=True)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            await self.gateway.dispatch(delivery)
+        self.assertEqual(self.store.current_attempt(delivery)["reason"], "claim_refused")
+        self.assertEqual(self.store.accept(copy.deepcopy(self.event))["duplicate"], True)
+        self.store.detach(self.event["runtimeId"])
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertEqual(self.store.get(delivery)["reason"], "claim_refused")
+        self.assertEqual(self.store.current_attempt(delivery)["reason"], "claim_refused")
+        self.restart()
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.now += 8 * 86400
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.get(delivery))
+
+    async def test_v2_claim_refusal_survives_attachment_replacement(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        refusal = CloudError("denied", definitive_refusal=True)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            await self.gateway.dispatch(delivery)
+        self.assertTrue(self.store.accept(copy.deepcopy(self.event))["duplicate"])
+
+        replacement_profile = dict(self.mapping["runtimeProfile"], conversationId=str(uuid.uuid4()))
+        replacement = dict(
+            self.mapping,
+            runtimeGeneration=self.mapping["runtimeGeneration"] + 1,
+            attachmentGeneration=self.mapping["attachmentGeneration"] + 1,
+            consumerGeneration=self.mapping["consumerGeneration"] + 1,
+            routingGeneration=self.mapping["routingGeneration"] + 1,
+            runtimeProfile=replacement_profile,
+            leaseExpiresAt=self.now + 3600,
+        )
+        self.store.put_messaging_attachment(replacement)
+        attempt = self.store.current_attempt(delivery)
+        self.assertEqual((attempt["state"], attempt["reason"]), ("stale", "claim_refused"))
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertTrue(self.store.get(delivery) is not None)
+
+        next_event = copy.deepcopy(self.event)
+        next_event.update(
+            eventId=str(uuid.uuid4()),
+            attemptId=str(uuid.uuid4()),
+            runtimeGeneration=replacement["runtimeGeneration"],
+            attachmentGeneration=replacement["attachmentGeneration"],
+            consumerGeneration=replacement["consumerGeneration"],
+            routingGeneration=replacement["routingGeneration"],
+            runtimeProfile=replacement_profile,
+        )
+        next_event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(next_event)
+        self.store.max_rows = 1
+        next_delivery = self.store.accept(next_event)["deliveryId"]
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertTrue(self.store.get(delivery) is not None)
+        self.restart()
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.now += 8 * 86400
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.get(delivery))
+        self.assertIsNotNone(self.store.get(next_delivery))
+
+    async def test_v2_uncertain_claim_remains_an_obligation_after_detach(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch.object(self.authority, "claim", side_effect=TimeoutError()):
+            await self.gateway.dispatch(delivery)
+        self.store.detach(self.event["runtimeId"])
+        self.assertEqual(self.store.current_attempt(delivery)["state"], "claiming")
+        self.assertEqual(self.store.current_attempt(delivery)["claim_uncertain"], 1)
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.now += 8 * 86400
+        self.store.cleanup()
+        self.assertIsNotNone(self.store.get(delivery))
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertEqual(self.authority.acks, [])
+        self.assertEqual(self.authority.settlements, [])
+
     async def test_v2_stock_unknown_restart_does_not_replay_codex(self):
         self.setup_messaging_v2_stock()
         delivery = self.accept()

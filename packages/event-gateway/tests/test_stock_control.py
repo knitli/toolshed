@@ -40,6 +40,38 @@ def response(status="attached", **changes):
 
 
 class StockControlTests(unittest.IsolatedAsyncioTestCase):
+    def test_invalid_cloud_config_returns_safe_refusal_without_mutation(self):
+        for operation in ("attach", "renew"):
+            for invalid in ("missing", "malformed", "permissions"):
+                with self.subTest(operation=operation, invalid=invalid), tempfile.TemporaryDirectory() as temp:
+                    state = Path(temp).resolve() / "state"
+                    original = self._stock_mapping(time.time())
+                    with Store(state) as store:
+                        store.put_attachment(original)
+                    config = Path(temp).resolve() / "cloud.json"
+                    if invalid != "missing":
+                        config.write_text("{" if invalid == "malformed" else "{}")
+                        config.chmod(0o600 if invalid == "malformed" else 0o644)
+                    output = io.StringIO()
+                    with patch.object(CloudClient, "assigned_stock") as cloud_call, \
+                            patch.object(cli, "Store") as local_store, \
+                            patch.object(cli, "request") as control_call, redirect_stdout(output):
+                        code = cli.stock_main([
+                            "--state-dir", str(state), "stock-control", operation,
+                            "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                            "--cloud-config", str(config),
+                            "--expected-runtime-generation", "1",
+                            "--expected-attachment-generation", "1",
+                        ])
+                    self.assertEqual(code, 2)
+                    self.assertEqual(json.loads(output.getvalue()),
+                                     {"assignment": None, "reason": "invalid_cloud_config"})
+                    cloud_call.assert_not_called()
+                    local_store.assert_not_called()
+                    control_call.assert_not_called()
+                    with Store(state) as store:
+                        self.assertEqual(store.get_attachment(RUNTIME), original)
+
     def _handoff(self, *, namespace="team/inbox", route_generation=1, agent_incarnation=1):
         return {
             "version": 1, "namespace": namespace, "principal": "owner@example.com", "agent": "codex",

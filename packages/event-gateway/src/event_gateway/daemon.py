@@ -11,7 +11,7 @@ import sqlite3
 import stat
 
 from .client_runtime import _private_json, load_cloud_client
-from .cloud import CloudError, _timestamp, _uuid
+from .cloud import CloudError, _json, _timestamp, _uuid
 from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
@@ -20,6 +20,9 @@ from .store import Store, StoreError
 
 
 BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated"]
+# CAS handoffs carry both the current and expected valid mappings; this bound is
+# separate from the signed HTTP protocol's 4096-byte envelope limit.
+_CONTROL_FRAME_BYTES = 8192
 
 
 def status(store, dispatch=None):
@@ -375,7 +378,7 @@ def _control_handler(store, dispatch):
         try:
             async with asyncio.timeout(5):
                 line = await reader.readline()
-                if len(line) > 4096:
+                if len(line) > _CONTROL_FRAME_BYTES:
                     raise ValueError("request_too_large")
                 request_value = json.loads(line)
                 try:
@@ -447,7 +450,9 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
                 dispatch = {"listenerReady": True, "workerRunning": True,
                             "authorityConfigured": True, "liveWakeVerified": False}
             control = _control_handler(store, dispatch)
-            server = await asyncio.start_unix_server(connected, path=path, limit=4096)
+            server = await asyncio.start_unix_server(
+                connected, path=path, limit=_CONTROL_FRAME_BYTES,
+            )
             os.chmod(path, 0o600)
             for sig in (signal.SIGINT, signal.SIGTERM):
                 loop.add_signal_handler(sig, _stop_dispatch, dispatch, listener, stop)
@@ -483,6 +488,9 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
 
 
 async def request(state_dir, value):
+    frame = _json(value) + b"\n"
+    if len(frame) > _CONTROL_FRAME_BYTES:
+        raise ValueError("request_too_large")
     path = Path(state_dir) / "control.sock"
     info = path.lstat()
     if (
@@ -494,7 +502,7 @@ async def request(state_dir, value):
     async with asyncio.timeout(5):
         reader, writer = await asyncio.open_unix_connection(path, limit=8192)
         try:
-            writer.write(json.dumps(value).encode() + b"\n")
+            writer.write(frame)
             await writer.drain()
             return json.loads(await reader.readline())
         finally:

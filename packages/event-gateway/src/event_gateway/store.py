@@ -643,7 +643,9 @@ class Store:
         self.db.execute(
             """UPDATE attempts SET fenced=1,
                state=CASE WHEN state IN ('submitting','submitted') THEN 'ambiguous' ELSE state END,
-               reason=CASE WHEN state='held' AND reason='over_budget' THEN reason ELSE 'attachment_detached' END,
+               reason=CASE WHEN state='held' AND reason='over_budget' THEN reason
+                           WHEN state='stale' AND reason='claim_refused' THEN reason
+                           ELSE 'attachment_detached' END,
                updated=? WHERE delivery_id IN (SELECT id FROM deliveries WHERE runtime=?)
                AND state NOT IN ('settled','observed')""",
             (self.clock(), runtime_id),

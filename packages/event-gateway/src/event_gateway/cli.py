@@ -395,7 +395,7 @@ def _execute_stock_control(args, state_dir):
         response = asyncio.run(cloud.assigned_stock(request_value))
     except (CloudError, SecurityError) as error:
         result = {"assignment": None, "reason": error.code}
-        if error.ambiguous:
+        if isinstance(error, CloudError) and error.ambiguous:
             if args.operation == "attach":
                 generation_pair = (
                     (1, 1) if args.expected_runtime_generation is None else
