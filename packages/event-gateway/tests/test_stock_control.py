@@ -180,6 +180,28 @@ class StockControlTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(cloud_calls, [])
                 self.assertEqual(json.loads(output.getvalue())["reason"], "stale_messaging_handoff")
 
+    def test_messaging_handoff_accepts_zero_incarnation_and_rejects_negative(self):
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+        with tempfile.TemporaryDirectory() as temp:
+            handoff_path = Path(temp).resolve() / "messaging-handoff.json"
+            expected = self._stock_mapping(NOW)
+            handoff_path.write_text(json.dumps(self._handoff(agent_incarnation=0)))
+            handoff_path.chmod(0o600)
+            accepted = cli._load_stock_messaging_handoff(
+                handoff_path, self._stock_renew_args(handoff_path), FakeCloud(), expected,
+            )
+            self.assertEqual(accepted["agentIncarnation"], 0)
+
+            handoff_path.write_text(json.dumps(self._handoff(agent_incarnation=-1)))
+            handoff_path.chmod(0o600)
+            with self.assertRaisesRegex(CloudError, "stale_messaging_handoff"):
+                cli._load_stock_messaging_handoff(
+                    handoff_path, self._stock_renew_args(handoff_path), FakeCloud(), expected,
+                )
+
     def test_detach_during_cloud_renew_does_not_resurrect_mapping(self):
         fixture_now = __import__("json").loads(
             (Path(__file__).resolve().parents[1] /

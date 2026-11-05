@@ -559,6 +559,52 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(self.requests[-1]["headers"], self.requests[-2]["headers"])
         self.assertEqual(admission, FIXTURE["admitted"])
 
+    async def test_assigned_stock_v2_no_start_uses_the_exact_admission_tuple_and_retries(self):
+        envelope, admission, _ = self.stock_messaging_vectors()
+        evidence = {"type": "local_not_submitted"}
+        result = {key: envelope[key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
+        result.update(status="not_started", permitId=admission["permitId"], nodeId=admission["nodeId"], evidence=evidence)
+        self.result = copy.deepcopy(result)
+        client = self.messaging_client()
+        for _ in range(2):
+            self.assertEqual(await client.settle_no_start(admission, evidence), result)
+            request = self.requests[-1]
+            self.assertEqual(request["url"], client.origin + "/v1/dispatch/settle-no-start")
+            self.assertEqual(json.loads(request["body"]), {
+                "deliveryId": envelope["deliveryId"], "attemptId": envelope["attemptId"],
+                "nodeGeneration": envelope["nodeGeneration"], "permitId": admission["permitId"],
+                "evidence": evidence,
+            })
+        self.assertNotEqual(self.requests[-2]["headers"], self.requests[-1]["headers"])
+
+    async def test_assigned_stock_v2_no_start_rejects_response_tuple_changes(self):
+        envelope, admission, _ = self.stock_messaging_vectors()
+        evidence = {"type": "local_not_submitted"}
+        valid = {key: envelope[key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
+        valid.update(status="not_started", permitId=admission["permitId"], nodeId=admission["nodeId"], evidence=evidence)
+        client = self.messaging_client()
+        for field, value in (("deliveryId", str(uuid.uuid4())), ("attemptId", str(uuid.uuid4())),
+                             ("nodeGeneration", True), ("permitId", str(uuid.uuid4())),
+                             ("nodeId", str(uuid.uuid4())), ("evidence", {"type": "other"}),
+                             ("extra", True)):
+            with self.subTest(field=field):
+                self.result = {**valid, field: value}
+                with self.assertRaisesRegex(CloudError, "^invalid_response$"):
+                    await client.settle_no_start(admission, evidence)
+
+    async def test_native_messaging_v2_history_cannot_be_settled(self):
+        envelope = copy.deepcopy(MESSAGING_FIXTURE["envelope"])
+        now = MESSAGING_FIXTURE["nowMs"] / 1000
+        admission = {
+            "status": "admitted", "permitId": str(uuid.uuid4()), "nodeId": envelope["nodeId"],
+            "permitIssuedAt": _iso(now - 2), "permitExpiresAt": _iso(now + 3),
+            "envelope": envelope,
+        }
+        client = self.messaging_client()
+        with self.assertRaisesRegex(CloudError, "messaging_v2_native_settlement_disabled"):
+            await client.settle_no_start(admission, {"type": "local_not_submitted"})
+        self.assertEqual(self.requests, [])
+
     async def test_settle_no_start_rejects_invalid_admission_before_http(self):
         mutations = (
             lambda value: value.update(nodeId=value["permitId"]),

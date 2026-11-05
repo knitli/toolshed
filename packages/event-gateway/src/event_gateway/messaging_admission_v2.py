@@ -1,4 +1,4 @@
-"""Dormant v2 metadata checks; no persistence, start permission, or ACK authority."""
+"""Stock-only v2 metadata checks; no persistence, start permission, or ACK authority."""
 
 # Exact built-in types reject bool-as-int and subclasses outside decoded JSON DTOs.
 # pylint: disable=unidiomatic-typecheck
@@ -38,6 +38,7 @@ def attachment_matches(attachment, envelope):
     elif 'runtimeProfile' in attachment:
         return False
     # Canonical JSON keeps bool distinct from integers but accepts integral floats.
+
     def canonical(value):
         if type(value) is dict:
             return {key: canonical(value[key]) for key in sorted(value)}

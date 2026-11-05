@@ -487,6 +487,8 @@ def _stock_renew_mapping_matches(mapping, args, cloud):
 
 def _load_stock_messaging_handoff(path, args, cloud, expected_mapping):
     """Validate a private owner route export before any Cloud stock renewal."""
+    # Exact built-in checks reject bool-as-int and subclasses in the closed JSON DTO.
+    # pylint: disable=unidiomatic-typecheck
     from . import messaging_protocol_v2 as messaging
 
     try:
@@ -509,7 +511,7 @@ def _load_stock_messaging_handoff(path, args, cloud, expected_mapping):
             and value["namespace"] == value["namespace"].strip()
             and 1 <= messaging._code_points(value["namespace"]) <= 256
             and not any(ord(char) < 32 or ord(char) == 127 for char in value["namespace"])
-            and type(value["agentIncarnation"]) is int and 0 < value["agentIncarnation"] <= messaging.MAX_SAFE_INTEGER
+            and type(value["agentIncarnation"]) is int and 0 <= value["agentIncarnation"] <= messaging.MAX_SAFE_INTEGER
             and messaging._integer(value["routeGeneration"])
             and value["principal"] == cloud.principal
             and value["agent"] == cloud.agent

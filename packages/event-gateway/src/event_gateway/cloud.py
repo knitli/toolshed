@@ -1046,8 +1046,30 @@ class CloudClient:
 
     async def settle_no_start(self, admission, evidence):
         _closed(admission, ("status", "permitId", "nodeId", "permitIssuedAt", "permitExpiresAt", "envelope"))
-        expected = self._envelope(admission["envelope"], historical=True)
-        admitted = validate_admission(admission, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
+        envelope = admission["envelope"]
+        if isinstance(envelope, dict) and envelope.get("schemaVersion") == 2:
+            from .messaging_admission_v2 import _historical_envelope, validate_admission as validate_messaging_admission
+            from .messaging_protocol_v2 import MessagingProtocolError, _runtime_profile
+
+            try:
+                expected = _historical_envelope(envelope, self._clock() * 1000)
+            except MessagingProtocolError as error:
+                raise CloudError("invalid_envelope") from error
+            if not _runtime_profile(expected.get("runtimeProfile")):
+                raise CloudError("messaging_v2_native_settlement_disabled")
+            if any(expected[key] != value for key, value in (
+                    ("principal", self.principal), ("agent", self.agent),
+                    ("nodeId", self.node_id), ("nodeGeneration", self.node_generation))):
+                raise CloudError("identity_mismatch")
+            try:
+                admitted = validate_messaging_admission(
+                    admission, expected, now_ms=self._clock() * 1000, node_id=self.node_id,
+                )
+            except MessagingProtocolError as error:
+                raise CloudError("invalid_admission") from error
+        else:
+            expected = self._envelope(envelope, historical=True)
+            admitted = validate_admission(admission, expected, now_ms=self._clock() * 1000, node_id=self.node_id)
         _no_start_evidence(evidence, code="invalid_request")
         body = {key: admitted["envelope"][key] for key in ("deliveryId", "attemptId", "nodeGeneration")}
         body.update(permitId=admitted["permitId"], evidence=json.loads(_json(evidence)))

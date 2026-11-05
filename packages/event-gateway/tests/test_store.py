@@ -299,6 +299,34 @@ class StoreTests(unittest.TestCase):
         self.store.record_admission(ident, admission)
         return ident, envelope["attemptId"]
 
+    def assigned_stock_v2_admitted(self):
+        from event_gateway.cloud import _iso
+        from event_gateway import messaging_protocol_v2
+
+        fixture = json.loads((Path(__file__).resolve().parents[1] /
+                              "contracts/messaging-v2/messaging-protocol-semantics-v2.json").read_text())
+        self.now = fixture["nowMs"] / 1000
+        envelope = copy.deepcopy(fixture["assigned_stock_envelope"])
+        envelope["runtimeId"] = str(uuid.uuid4())
+        envelope["issuedAt"] = _iso(self.now - 30)
+        envelope["expiresAt"] = _iso(self.now + 30)
+        envelope["deliveryId"] = messaging_protocol_v2.derive_delivery_id(envelope)
+        mapping = {key: envelope[key] for key in (
+            "principal", "agent", "nodeId", "runtimeId", "nodeGeneration",
+            "runtimeGeneration", "attachmentGeneration", "consumerGeneration", "routingGeneration",
+        )}
+        mapping.update(namespace=envelope["canonicalSubject"]["namespace"],
+                       agentIncarnation=envelope["canonicalSubject"]["agentIncarnation"],
+                       runtimeProfile=envelope["runtimeProfile"], leaseExpiresAt=self.now + 3600)
+        self.store.put_messaging_attachment(mapping)
+        ident = self.store.accept(envelope)["deliveryId"]
+        self.assertTrue(self.store.begin_claim(ident))
+        admission = {"status": "admitted", "permitId": str(uuid.uuid4()), "nodeId": envelope["nodeId"],
+                    "permitIssuedAt": _iso(self.now - 1), "permitExpiresAt": _iso(self.now + 4),
+                    "envelope": copy.deepcopy(envelope)}
+        self.store.record_admission(ident, admission)
+        return ident, envelope, admission
+
     def test_stock_submit_is_fenced_by_live_permit_inside_store_transition(self):
         ident, attempt = self.stock_admitted()
         self.assertTrue(self.store.begin_stock_submit(ident, attempt))
@@ -654,6 +682,28 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(self.store.mark_acknowledged(ident, "observed", attempt_id=attempt))
         old = self.store.db.execute("SELECT state,settlement,reserved_bytes FROM attempts WHERE attempt_id=?", (attempt,)).fetchone()
         self.assertEqual(tuple(old), ("settled", json.dumps(result, sort_keys=True, separators=(",", ":")), 0))
+
+    def test_assigned_stock_v2_local_settlement_requeues_inertly_and_rotates_once(self):
+        ident, envelope, admission = self.assigned_stock_v2_admitted()
+        attempt = envelope["attemptId"]
+        evidence = {"type": "local_not_submitted"}
+        self.assertTrue(self.store.begin_settlement(ident, attempt, evidence))
+        result = self.settlement(admission, evidence)
+        for key, value in (("deliveryId", str(uuid.uuid4())), ("attemptId", str(uuid.uuid4())),
+                           ("nodeGeneration", True), ("permitId", str(uuid.uuid4())),
+                           ("nodeId", str(uuid.uuid4())), ("evidence", {"type": "other"}),
+                           ("extra", True)):
+            with self.subTest(key=key), self.assertRaisesRegex(StoreError, "invalid_settlement"):
+                self.store.complete_settlement(ident, attempt, {**result, key: value})
+        self.assertEqual(self.store.current_attempt(ident)["state"], "settlement_pending")
+        self.assertTrue(self.store.complete_settlement(ident, attempt, result))
+        rotated = self.store.delivery_envelope(ident)
+        self.assertNotEqual(rotated["attemptId"], attempt)
+        self.assertEqual(self.store.get(ident)["status"], "held")
+        self.assertFalse(self.store.complete_settlement(ident, attempt, result))
+        self.assertEqual(self.store.delivery_envelope(ident), rotated)
+        self.assertTrue(self.store.begin_claim(ident))
+        self.assertEqual(self.store.current_attempt(ident)["state"], "claiming")
 
     def test_native_terminal_settlement_requires_exact_receipt_and_no_positive_correlation(self):
         ident, admission = self.admitted()

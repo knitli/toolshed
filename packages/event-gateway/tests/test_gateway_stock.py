@@ -183,6 +183,60 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("nativeCorrelation", acknowledgment)
         self.assertEqual(attempt["state"], "command_accepted")
 
+    async def test_v2_completed_ack_releases_pending_capacity_and_expires(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})):
+            await self.gateway.dispatch(delivery)
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertIsNone(self.store.status()["blockedReason"])
+        next_event = dict(self.event, eventId=str(uuid.uuid4()), attemptId=str(uuid.uuid4()))
+        next_event["deliveryId"] = messaging_protocol_v2.derive_delivery_id(next_event)
+        self.store.accept(next_event)
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.now += 8 * 86400
+        self.store.cleanup()
+        self.assertIsNone(self.store.delivery(delivery))
+        self.assertIsNone(self.store.current_attempt(delivery))
+
+    async def test_v2_lost_ack_remains_pending_and_retained_until_exact_retry(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        self.authority.drop_ack = True
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(result={"status": "command_accepted"})) as submit:
+            await self.gateway.dispatch(delivery)
+            self.assertEqual(self.store.status()["pending"], 1)
+            self.now += 8 * 86400
+            self.store.cleanup()
+            self.assertIsNotNone(self.store.delivery(delivery))
+            self.assertIsNotNone(self.store.current_attempt(delivery))
+            await self.gateway.reconcile(delivery)
+        self.assert_stock_submit_once(submit)
+        self.assertEqual(self.authority.acks[0], self.authority.acks[1])
+        self.assertEqual(self.store.status()["pending"], 0)
+
+    async def test_v2_no_start_retries_settlement_before_any_new_client_submission(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        self.authority.fail_settlement_once = True
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=StockCodexError("client_not_started"))) as submit:
+            result = await self.gateway.dispatch(delivery)
+            self.assertEqual(result["status"], "settlement_pending")
+            attempt_id = self.store.current_attempt(delivery)["attempt_id"]
+            self.restart()
+            recovered = await self.gateway.reconcile(delivery)
+        self.assert_stock_submit_once(submit)
+        self.assertEqual(recovered["status"], "held")
+        self.assertIsNone(self.store.current_attempt(delivery))
+        self.assertNotEqual(self.store.delivery_envelope(delivery)["attemptId"], attempt_id)
+        self.assertEqual(self.authority.settlements[0], self.authority.settlements[1])
+        self.assertEqual(self.authority.acks, [])
+
     async def test_v2_stock_unknown_restart_does_not_replay_codex(self):
         self.setup_messaging_v2_stock()
         delivery = self.accept()
