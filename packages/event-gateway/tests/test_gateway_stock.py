@@ -194,6 +194,114 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         submit.assert_awaited_once()
         self.assertEqual(self.authority.acks, [])
 
+    async def test_v2_ambiguous_stock_recovery_survives_restart_and_detach(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))) as submit:
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "ambiguous")
+            self.restart()
+            self.store.detach(self.event["runtimeId"])
+            self.assertEqual((await self.gateway.reconcile(delivery))["status"], "ambiguous")
+        submit.assert_awaited_once()
+        summary = self.store.list_stock_recovery(delivery_id=delivery)
+        self.assertEqual(summary["truncated"], False)
+        item, = summary["deliveries"]
+        self.assertEqual(item["deliveryId"], delivery)
+        self.assertEqual(item["attemptId"], self.event["attemptId"])
+        self.assertEqual(item["conversationId"], self.event["runtimeProfile"]["conversationId"])
+        self.assertEqual(item["machineState"], "unknown")
+        self.assertEqual(item["cloudObligation"], "unresolved")
+
+        before = self.store.current_attempt(delivery)
+        first = self.store.abandon_stock_delivery(delivery, item["attemptId"], item["expectedIdentitySha256"])
+        second = self.store.abandon_stock_delivery(delivery, item["attemptId"], item["expectedIdentitySha256"])
+        after = self.store.current_attempt(delivery)
+        self.assertEqual(first, second)
+        self.assertEqual(first["action"], "abandoned")
+        self.assertEqual(first["cloudObligation"], "unresolved")
+        self.assertEqual(self.store.get(delivery)["status"], "ambiguous")
+        self.assertEqual(after["native_ack"], before["native_ack"])
+        self.assertEqual(after["reserved_bytes"], before["reserved_bytes"])
+        self.assertEqual(self.authority.acks, [])
+        self.assertEqual(self.authority.settlements, [])
+
+    async def test_v2_stock_recovery_identity_binds_all_message_and_destination_fields(self):
+        self.setup_messaging_v2_stock()
+        delivery = self.accept()
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock(error=TimeoutError("lost CLI response"))):
+            await self.gateway.dispatch(delivery)
+        attempt = self.store.current_attempt(delivery)
+        base = self.store._stock_recovery_identity(
+            attempt["envelope"], attempt["admission"], now_ms=self.now * 1000,
+        )
+        self.assertIsNotNone(base)
+        original_digest = base[1]
+        changes = (
+            ("runtimeProfile", lambda event: event["runtimeProfile"].update(conversationId=str(uuid.uuid4())), None),
+            ("namespace", lambda event: event["canonicalSubject"].update(namespace="changed.example"), None),
+            ("messageId", lambda event: event["canonicalSubject"].update(messageId=str(uuid.uuid4())), None),
+            ("agentIncarnation", lambda event: event["canonicalSubject"].update(agentIncarnation=event["canonicalSubject"]["agentIncarnation"] + 1), None),
+            ("sourceStateVersion", lambda event: event.update(sourceStateVersion="msg:" + "b" * 64), None),
+            ("routingGeneration", lambda event: event.update(routingGeneration=event["routingGeneration"] + 1), None),
+            ("nodeId", lambda event: event.update(nodeId=str(uuid.uuid4())), None),
+            ("nodeGeneration", lambda event: event.update(nodeGeneration=event["nodeGeneration"] + 1), None),
+            ("runtimeGeneration", lambda event: event.update(runtimeGeneration=event["runtimeGeneration"] + 1), None),
+            ("attachmentGeneration", lambda event: event.update(
+                attachmentGeneration=event["attachmentGeneration"] + 1,
+                consumerGeneration=event["consumerGeneration"] + 1,
+            ), None),
+            ("permitId", lambda _event: None, lambda admission: admission.update(permitId=str(uuid.uuid4()))),
+            ("permitIssuedAt", lambda event: event.update(
+                issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59),
+            ), lambda admission: (
+                admission.update(permitIssuedAt=_iso(self.now - 1), permitExpiresAt=_iso(self.now + 4)),
+                admission["envelope"].update(issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59)),
+            )),
+            ("permitExpiresAt", lambda event: event.update(
+                issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59),
+            ), lambda admission: (
+                admission.update(permitIssuedAt=_iso(self.now - 1), permitExpiresAt=_iso(self.now + 4)),
+                admission["envelope"].update(issuedAt=_iso(self.now - 1), expiresAt=_iso(self.now + 59)),
+            )),
+        )
+        for label, change_event, change_admission in changes:
+            with self.subTest(field=label):
+                changed = copy.deepcopy(attempt["envelope"])
+                change_event(changed)
+                changed["deliveryId"] = messaging_protocol_v2.derive_delivery_id(changed)
+                changed_admission = copy.deepcopy(attempt["admission"])
+                changed_admission["nodeId"] = changed["nodeId"]
+                changed_admission["envelope"] = copy.deepcopy(changed)
+                if change_admission:
+                    change_admission(changed_admission)
+                identity = self.store._stock_recovery_identity(
+                    changed, changed_admission, now_ms=self.now * 1000,
+                )
+                self.assertIsNotNone(identity)
+                self.assertNotEqual(identity[1], original_digest)
+                self.store.db.execute(
+                    "UPDATE deliveries SET envelope=? WHERE id=?",
+                    (json.dumps(changed), delivery),
+                )
+                self.store.db.execute(
+                    "UPDATE attempts SET envelope=?, admission=? WHERE delivery_id=?",
+                    (json.dumps(changed), json.dumps(changed_admission), delivery),
+                )
+                self.store.db.commit()
+                with self.assertRaisesRegex(StoreError, "^stale_recovery_identity$"):
+                    self.store.abandon_stock_delivery(delivery, attempt["attempt_id"], original_digest)
+                self.store.db.execute(
+                    "UPDATE deliveries SET envelope=? WHERE id=?",
+                    (json.dumps(attempt["envelope"]), delivery),
+                )
+                self.store.db.execute(
+                    "UPDATE attempts SET envelope=?, admission=? WHERE delivery_id=?",
+                    (json.dumps(attempt["envelope"]), json.dumps(attempt["admission"]), delivery),
+                )
+                self.store.db.commit()
+
     async def test_v2_stock_lost_cloud_ack_retries_exact_ack_after_restart(self):
         self.setup_messaging_v2_stock()
         delivery = self.accept()

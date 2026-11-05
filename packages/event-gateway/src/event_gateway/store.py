@@ -753,8 +753,10 @@ class Store:
         return result
 
     @staticmethod
-    def _stock_recovery_identity(envelope, admission):
+    def _stock_recovery_identity(envelope, admission, now_ms=None):
         """Hash exact delivery, stock conversation, and all destination generations."""
+        if isinstance(envelope, dict) and envelope.get("schemaVersion") == 2:
+            return Store._stock_recovery_identity_v2(envelope, admission, now_ms=now_ms)
         from .cloud import _generation, _safe_uint, _uuid
         from .protocol import ProtocolError, validate_runtime_profile
 
@@ -797,6 +799,28 @@ class Store:
         identity["nodeId"] = admission["nodeId"]
         return identity, hashlib.sha256(_json(identity).encode()).hexdigest()
 
+    @staticmethod
+    def _stock_recovery_identity_v2(envelope, admission, *, now_ms=None):
+        """Validate and hash an exact historical Messaging v2 stock admission."""
+        from .messaging_admission_v2 import validate_admission
+        from .messaging_protocol_v2 import MessagingProtocolError
+        from . import messaging_protocol_v2 as protocol
+
+        if not isinstance(admission, dict):
+            return None
+        try:
+            admitted = validate_admission(
+                admission, envelope, now_ms=time.time() * 1000 if now_ms is None else now_ms,
+                node_id=admission.get("nodeId"),
+            )
+        except (MessagingProtocolError, KeyError, TypeError, ValueError, OverflowError, RecursionError):
+            return None
+        if not protocol._runtime_profile(admitted["envelope"].get("runtimeProfile")):
+            return None
+        # Hash all validated envelope and immutable admission metadata, with no
+        # field projection that can drift away from the source contract.
+        return admitted, hashlib.sha256(_json(admitted).encode()).hexdigest()
+
     def list_stock_recovery(self, limit=100, delivery_id=None):
         """Return a bounded, content-free view of unresolved stock input attempts."""
         if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
@@ -828,16 +852,19 @@ class Store:
         summaries = []
         for row in rows[:limit]:
             envelope = json.loads(row["envelope"])
-            identity = self._stock_recovery_identity(envelope, json.loads(row["admission"] or "null"))
+            identity = self._stock_recovery_identity(
+                envelope, json.loads(row["admission"] or "null"), now_ms=self.clock() * 1000,
+            )
             if identity is None:
                 continue
             exact, digest = identity
+            stock_envelope = exact["envelope"] if "envelope" in exact else exact
             summaries.append({
-                "deliveryId": exact["deliveryId"], "attemptId": exact["attemptId"],
-                "runtimeId": exact["runtimeId"],
-                "conversationId": exact["runtimeProfile"]["conversationId"],
-                "runtimeGeneration": exact["runtimeGeneration"],
-                "attachmentGeneration": exact["attachmentGeneration"],
+                "deliveryId": stock_envelope["deliveryId"], "attemptId": stock_envelope["attemptId"],
+                "runtimeId": stock_envelope["runtimeId"],
+                "conversationId": stock_envelope["runtimeProfile"]["conversationId"],
+                "runtimeGeneration": stock_envelope["runtimeGeneration"],
+                "attachmentGeneration": stock_envelope["attachmentGeneration"],
                 "expectedIdentitySha256": digest, "machineState": "unknown",
                 "operatorDisposition": (json.loads(row["operator_disposition"])
                                          if row["operator_disposition"] else None),
@@ -862,7 +889,9 @@ class Store:
             if delivery is None or attempt is None:
                 raise StoreError("not_found")
             envelope = json.loads(delivery["envelope"])
-            identity = self._stock_recovery_identity(envelope, json.loads(attempt["admission"] or "null"))
+            identity = self._stock_recovery_identity(
+                envelope, json.loads(attempt["admission"] or "null"), now_ms=self.clock() * 1000,
+            )
             if identity is None:
                 raise StoreError("not_stock_delivery")
             _, digest = identity
