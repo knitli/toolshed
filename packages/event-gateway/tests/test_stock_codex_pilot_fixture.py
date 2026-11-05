@@ -6,7 +6,7 @@ from contextlib import redirect_stdout
 import io
 import os
 import socket
-import subprocess
+import subprocess  # nosec B404 -- Only DEVNULL and mocked argument-only CLI calls; no shell.
 import sys
 import tempfile
 import threading

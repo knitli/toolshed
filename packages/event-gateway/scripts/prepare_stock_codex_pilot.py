@@ -1,4 +1,4 @@
-"""Prepare a bounded local Codex fixture for an owner-run stock pilot.
+"""Prepare a bounded macOS Codex fixture for an owner-run stock pilot.
 
 This fixture creates no Cloud state and never queues references. Keep the
 reported CODEX_HOME only for fixture Gateway/TUI processes; the Gateway must
@@ -217,6 +217,7 @@ def _owned_daemon_socket(fixture_root, reported_path):
         alias = reported.lstat()
         if alias.st_uid != os.getuid() or not (stat.S_ISSOCK(alias.st_mode) or stat.S_ISLNK(alias.st_mode)):
             return False
+        # Stock Codex's private alias targets its same-user socket outside CODEX_HOME.
         target = reported.resolve(strict=True).stat()
         return stat.S_ISSOCK(target.st_mode) and target.st_uid == os.getuid()
     except (OSError, ValueError):
@@ -238,6 +239,7 @@ def _stop_owned_updater(home, record):
             return False
         if " ".join(ps("lstart").split()) != " ".join(str(record.get("processStartTime", "")).split()):
             return False
+        # macOS ps reports the image path; an unproved/basename-only image fails closed.
         executable = Path(ps("comm")).resolve(strict=True)
         executable.relative_to(Path(home).resolve(strict=True))
         if not executable.is_file():
