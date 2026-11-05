@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from event_gateway.cloud import _iso
+from event_gateway.cloud import CloudError, _iso
 from event_gateway.gateway import Gateway
 from event_gateway import messaging_protocol_v2
 from event_gateway.protocol import derive_delivery_id
@@ -236,6 +236,36 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(self.store.delivery_envelope(delivery)["attemptId"], attempt_id)
         self.assertEqual(self.authority.settlements[0], self.authority.settlements[1])
         self.assertEqual(self.authority.acks, [])
+
+    async def test_v2_definitive_claim_refusal_releases_capacity_and_expires(self):
+        self.setup_messaging_v2_stock()
+        self.store.max_rows = 1
+        delivery = self.accept()
+        refusal = CloudError("denied", definitive_refusal=True)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            self.assertEqual((await self.gateway.dispatch(delivery))["status"], "stale")
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.assertTrue(self.store.accept(self.event)["duplicate"])
+        self.restart()
+        self.assertEqual(self.store.status()["pending"], 0)
+        self.now += 8 * 86400
+        self.assertEqual(self.store.cleanup(), 1)
+        self.assertIsNone(self.store.current_attempt(delivery))
+
+    async def test_v2_definitive_refusal_cannot_release_prior_claim_uncertainty(self):
+        self.setup_messaging_v2_stock()
+        refusal = CloudError("denied", definitive_refusal=True)
+        uncertain = self.accept()
+        with patch.object(self.authority, "claim", side_effect=TimeoutError()):
+            await self.gateway.dispatch(uncertain)
+        with patch.object(self.authority, "claim", side_effect=refusal):
+            self.assertEqual((await self.gateway.reconcile(uncertain))["status"], "claiming")
+        self.now += 8 * 86400
+        self.store.cleanup()
+        self.assertEqual(self.store.status()["pending"], 1)
+        self.assertEqual(self.store.current_attempt(uncertain)["claim_uncertain"], 1)
+        self.assertEqual(self.authority.acks, [])
+        self.assertEqual(self.authority.settlements, [])
 
     async def test_v2_stock_unknown_restart_does_not_replay_codex(self):
         self.setup_messaging_v2_stock()

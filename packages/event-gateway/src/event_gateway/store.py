@@ -451,7 +451,7 @@ class Store:
         if (not protocol._runtime_profile(profile)
                 or profile.get("profile") != "assigned_stock_client"
                 or any(expected_mapping.get(key) != mapping.get(key) for key in identity_fields)):
-                raise StoreError("invalid_attachment")
+            raise StoreError("invalid_attachment")
         return expected_mapping
 
     def _put_attachment(self, mapping, *, transfer=None, allow_stock_messaging_upgrade=False,
@@ -1769,7 +1769,8 @@ class Store:
     def _messaging_obligations(self):
         obligations = set()
         for row in self.db.execute(
-            "SELECT d.id,d.envelope,d.state,d.ack_state,a.attempt_id,a.state AS attempt_state "
+            "SELECT d.id,d.envelope,d.state,d.ack_state,a.attempt_id,a.state AS attempt_state,"
+            "a.reason AS attempt_reason,a.admission "
             "FROM deliveries d JOIN attempts a ON a.delivery_id=d.id"
         ):
             envelope = json.loads(row["envelope"])
@@ -1777,6 +1778,9 @@ class Store:
                 continue
             if _assigned_stock_v2(envelope):
                 if row["attempt_state"] == "settled":
+                    continue
+                if (row["attempt_state"] == "stale" and row["attempt_reason"] == "claim_refused"
+                        and row["admission"] is None):
                     continue
                 if (row["state"] == row["ack_state"] == row["attempt_state"] == "command_accepted"
                         and row["attempt_id"] == envelope["attemptId"]):
