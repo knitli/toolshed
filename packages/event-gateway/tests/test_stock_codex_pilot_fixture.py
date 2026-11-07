@@ -4,6 +4,7 @@ from pathlib import Path
 import errno
 from contextlib import redirect_stdout
 from contextlib import redirect_stderr
+from copy import deepcopy
 import io
 import os
 import socket
@@ -11,6 +12,7 @@ import subprocess  # nosec B404 -- Only DEVNULL and mocked argument-only CLI cal
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -31,6 +33,7 @@ from prepare_stock_codex_pilot import (  # noqa: E402
     _request_record,
     _pop_control_line,
     pilot_evidence,
+    pilot_progress,
 )
 from probe_stock_codex_queue import _cli  # noqa: E402
 
@@ -241,6 +244,79 @@ class PilotEvidenceTests(unittest.TestCase):
         result = pilot_evidence(requests, events, IDLE_REF, BUSY_REF)
         self.assertTrue(result["passed"])
         self.assertEqual((result["idleRequest"], result["heldRequest"], result["busyRequest"]), (1, 2, 3))
+
+    def test_progress_proves_completed_idle_request_before_held_turn(self):
+        requests, events = _evidence_inputs()
+        observed_requests, observed_events = requests[:1], events[:2]
+        original_requests, original_events = deepcopy(observed_requests), deepcopy(observed_events)
+        result = pilot_progress(observed_requests, observed_events, IDLE_REF)
+        self.assertEqual(result, {"status": "observed", "request": 1, "session": "A",
+                                  "responseWritten": True, "phase": "idle"})
+        self.assertEqual(observed_requests, original_requests)
+        self.assertEqual(observed_events, original_events)
+
+    def test_progress_reports_pending_until_exact_idle_response_is_written(self):
+        requests, events = _evidence_inputs()
+        self.assertEqual(pilot_progress([], [], IDLE_REF),
+                         {"status": "pending", "reason": "request_not_observed"})
+        self.assertEqual(pilot_progress(requests[:1], events[:1], IDLE_REF),
+                         {"status": "pending", "reason": "response_not_written"})
+        self.assertEqual(pilot_progress(requests[:2], [events[0], events[2]], IDLE_REF),
+                         {"status": "pending", "reason": "response_not_written"})
+
+    def test_progress_rejects_idle_response_that_finishes_after_held_request(self):
+        requests, events = _evidence_inputs()
+        events.remove({"event": "response_written", "number": 1})
+        events.insert(events.index({"event": "request", "number": 2}) + 1,
+                      {"event": "response_written", "number": 1})
+        self.assertEqual(pilot_progress(requests[:2], events, IDLE_REF),
+                         {"status": "invalid", "reason": "idle_response_not_before_held_request"})
+
+    def test_progress_jsonl_command_routes_without_fixture_construction(self):
+        fixture = PilotFixture.__new__(PilotFixture)
+        fixture.started = time.monotonic()
+        fixture.stopped = False
+        fixture.progress = Mock(return_value={"status": "pending", "reason": "request_not_observed"})
+        commands = [
+            (f'{{"command":"progress","reference":"{IDLE_REF}"}}\n').encode(),
+            b'{"command":"stop"}\n',
+        ]
+        with patch.object(fixture, "_read_control_line", side_effect=commands), \
+                redirect_stdout(io.StringIO()) as output:
+            fixture.serve()
+        fixture.progress.assert_called_once_with(IDLE_REF)
+        self.assertEqual(output.getvalue().splitlines(), [
+            '{"status":"pending","reason":"request_not_observed"}', '{"stopped":true}',
+        ])
+
+    def test_progress_gates_busy_request_on_held_response_and_exposes_no_content(self):
+        requests, events = _evidence_inputs()
+        result = pilot_progress(requests, events, BUSY_REF)
+        self.assertEqual(result, {"status": "observed", "request": 3, "session": "A",
+                                  "responseWritten": False, "phase": "after_held_response"})
+        self.assertNotIn("synthetic busy turn marker", repr(result))
+        self.assertNotIn("synthetic held response e3 marker", repr(result))
+
+    def test_progress_rejects_busy_request_before_held_response(self):
+        requests, events = _evidence_inputs()
+        events.remove({"event": "request", "number": 3})
+        events.insert(events.index({"event": "response_written", "number": 2}),
+                      {"event": "request", "number": 3})
+        self.assertEqual(pilot_progress(requests, events, BUSY_REF),
+                         {"status": "invalid", "reason": "not_after_held_response"})
+
+    def test_progress_rejects_wrong_session_and_duplicate_exact_reference(self):
+        requests, events = _evidence_inputs()
+        wrong_session = [dict(requests[0], sessionMarkers=[SESSION_B])]
+        self.assertEqual(pilot_progress(wrong_session, events[:2], IDLE_REF),
+                         {"status": "invalid", "reason": "wrong_session_or_input"})
+        duplicate = [requests[0], dict(requests[0], number=4)]
+        self.assertEqual(pilot_progress(duplicate, events[:2], IDLE_REF),
+                         {"status": "invalid", "reason": "reference_not_unique"})
+
+    def test_progress_rejects_malformed_reference_without_echoing_it(self):
+        result = pilot_progress([], [], "private prompt text")
+        self.assertEqual(result, {"status": "invalid", "reason": "invalid_reference"})
 
     def test_historic_refs_and_held_prompt_do_not_reclassify_followup(self):
         payload = {"input": [
