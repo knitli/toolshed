@@ -13,7 +13,7 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_gateway import daemon
 from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso, _stock_watch_request
-from event_gateway.store import Store
+from event_gateway.store import Store, StoreError
 
 
 RUNTIME = "12345678-1234-4234-8234-123456789abc"
@@ -843,6 +843,126 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([value["operation"] for value in cloud_requests],
                                  ["watch_list"])
             finally:
+                stop.set()
+                await asyncio.gather(worker, return_exceptions=True)
+
+    async def test_deferred_capacity_refusal_does_not_cancel_existing_recovery(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        other_runtime = "42345678-1234-4234-8234-123456789abc"
+        other = dict(mapping(now[0]), runtimeId=other_runtime)
+        existing = watch(int(now[0] * 1000),
+                         subject={"repositoryId": 99, "prNumber": 1}, lease_seconds=40)
+        untracked = watch(int(now[0] * 1000),
+                          subject={"repositoryId": 99, "prNumber": 2}, lease_seconds=40)
+        request = daemon._watch_request(local, "watch_renew", watch=existing)
+        receipt = deepcopy(existing)
+        receipt["attachment"]["leaseRevision"] += 1
+        receipt["attachment"]["leaseUntil"] = int(min(
+            local["leaseExpiresAt"], now[0] + 90) * 1000)
+        readback_entered, release_readback = asyncio.Event(), asyncio.Event()
+        readback_cancelled = asyncio.Event()
+        listing_seen, fallback_attempted = asyncio.Event(), asyncio.Event()
+        cloud_requests = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                cloud_requests.append(deepcopy(value))
+                if value["operation"] == "watch_list":
+                    listing_seen.set()
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "list", "watches": [existing, untracked],
+                                        "nextSubject": None}}
+                if value["operation"] == "watch_readback":
+                    if value["operationId"] != request["operationId"]:
+                        raise AssertionError("deferred capacity row must not create a request")
+                    readback_entered.set()
+                    try:
+                        await release_readback.wait()
+                    except asyncio.CancelledError:
+                        readback_cancelled.set()
+                        raise
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "known",
+                                        "operationId": request["operationId"],
+                                        "watch": receipt}}
+                raise AssertionError("capacity refusal must not send a new renewal")
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.put_attachment(other)
+            store.remember_stock_watch(local, existing)
+            store.save_stock_watch_request(RUNTIME, existing["subject"],
+                                           existing["incarnation"], request)
+            for pr in range(1, 32):
+                current = watch(int(now[0] * 1000),
+                                subject={"repositoryId": 17, "prNumber": pr})
+                current["attachment"]["holder"]["runtimeId"] = other_runtime
+                store.remember_stock_watch(other, current)
+                if pr == 1:
+                    pending = {"operation": "watch_renew", "runtimeId": other_runtime,
+                               "operationId": str(uuid.uuid4()), "subject": current["subject"]}
+                    store.save_stock_watch_request(other_runtime, current["subject"],
+                                                   current["incarnation"], pending)
+            other_before = store.stock_watch_rows(other_runtime)
+            target_before = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(store.db.execute(
+                "SELECT COUNT(*) FROM stock_watches").fetchone()[0], 32)
+            remember = store.remember_stock_watch
+            deferred_attempts = 0
+
+            def track_deferred_attempt(mapping_value, watch_value):
+                nonlocal deferred_attempts
+                if (mapping_value["runtimeId"] == RUNTIME
+                        and watch_value["subject"] == untracked["subject"]):
+                    deferred_attempts += 1
+                try:
+                    return remember(mapping_value, watch_value)
+                except StoreError:
+                    if deferred_attempts >= 3:
+                        fallback_attempted.set()
+                    raise
+
+            store.remember_stock_watch = track_deferred_attempt
+            ready, event, stop = {RUNTIME: local}, asyncio.Event(), asyncio.Event()
+            event.set()
+            worker = asyncio.create_task(daemon._stock_watch_worker(
+                store, FakeCloud(), stop, ready, event))
+            try:
+                await asyncio.wait_for(readback_entered.wait(), 1)
+                await asyncio.wait_for(listing_seen.wait(), 1)
+                for _ in range(100):
+                    if fallback_attempted.is_set():
+                        break
+                    await asyncio.sleep(0.001)
+                self.assertTrue(fallback_attempted.is_set(),
+                                (deferred_attempts, worker.done(),
+                                 worker.exception() if worker.done() else None,
+                                 store.stock_watch_rows(RUNTIME)))
+                await asyncio.sleep(0.01)
+                self.assertFalse(worker.done())
+                self.assertFalse(readback_cancelled.is_set())
+                self.assertEqual(store.stock_watch_rows(other_runtime), other_before)
+                self.assertEqual(store.stock_watch_rows(RUNTIME), target_before)
+                self.assertEqual([value["operation"] for value in cloud_requests],
+                                 ["watch_readback", "watch_list"])
+                release_readback.set()
+                for _ in range(100):
+                    rows = store.stock_watch_rows(RUNTIME)
+                    if rows[0]["pending"] is None:
+                        break
+                    await asyncio.sleep(0.001)
+                self.assertIsNone(rows[0]["pending"])
+                self.assertEqual(rows[0]["watch"], receipt)
+                self.assertEqual(rows[0]["receipt"]["operationId"], request["operationId"])
+                self.assertEqual(store.stock_watch_rows(other_runtime), other_before)
+                self.assertFalse(worker.done())
+            finally:
+                release_readback.set()
                 stop.set()
                 await asyncio.gather(worker, return_exceptions=True)
 

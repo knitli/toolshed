@@ -539,7 +539,11 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
         store.prune_stock_watches(runtime, active_keys)
         for watch in deferred_watches:
             if not prepare_watch(watch):
-                store.remember_stock_watch(mapping, watch)
+                try:
+                    store.remember_stock_watch(mapping, watch)
+                except StoreError as error:
+                    if error.code != "capacity":
+                        raise
 # Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
 async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""
