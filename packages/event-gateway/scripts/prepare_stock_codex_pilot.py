@@ -3,8 +3,8 @@
 This fixture creates no Cloud state and never queues references. Keep the
 reported CODEX_HOME only for fixture Gateway/TUI processes; the Gateway must
 retain the real HOME needed by its installed token helper. Send one JSONL
-control at a time: status, start_busy, release, evidence (idleReference and
-busyReference), or stop.
+control at a time: status, start_busy, release, progress (reference), evidence
+(idleReference and busyReference), or stop.
 """
 
 import argparse
@@ -214,6 +214,70 @@ def pilot_evidence(requests, events, idle_reference, busy_reference, baseline=0)
             "heldRequest": held["number"], "busyRequest": busy["number"]}
 
 
+def pilot_progress(requests, events, reference, baseline=0):
+    """Return bounded proof that one exact ref reached the synthetic provider in A."""
+    if not isinstance(reference, str) or not REFERENCE.fullmatch(reference):
+        return {"status": "invalid", "reason": "invalid_reference"}
+    observed = requests[baseline:]
+    matches = [row for row in observed if reference in row.get("latestUserReferences", [])]
+    if not matches:
+        return {"status": "pending", "reason": "request_not_observed"}
+    if len(matches) != 1:
+        return {"status": "invalid", "reason": "reference_not_unique"}
+    row = matches[0]
+    if (row.get("latestUserReferences") != [reference]
+            or row.get("sessionMarkers") != [SESSION_A]
+            or any(SESSION_B in item.get("sessionMarkers", []) for item in observed)):
+        return {"status": "invalid", "reason": "wrong_session_or_input"}
+    number = row.get("number")
+    names = [(event.get("event"), event.get("number")) for event in events]
+    try:
+        request_index = names.index(("request", number))
+    except ValueError:
+        return {"status": "pending", "reason": "request_event_missing"}
+    try:
+        response_index = names.index(("response_written", number))
+    except ValueError:
+        response_index = None
+    if response_index is not None and response_index <= request_index:
+        return {"status": "invalid", "reason": "event_order_invalid"}
+
+    held_rows = [item for item in observed if item.get("heldPrompt") is True]
+    if held_rows:
+        if len(held_rows) != 1:
+            return {"status": "invalid", "reason": "held_request_not_unique"}
+        if held_rows[0].get("sessionMarkers") != [SESSION_A]:
+            return {"status": "invalid", "reason": "wrong_session_or_input"}
+        held_number = held_rows[0].get("number")
+        try:
+            held_request_index = names.index(("request", held_number))
+        except ValueError:
+            return {"status": "pending", "reason": "held_request_not_observed"}
+        if number < held_number:
+            if response_index is None:
+                return {"status": "pending", "reason": "response_not_written"}
+            if not request_index < response_index < held_request_index:
+                return {"status": "invalid", "reason": "idle_response_not_before_held_request"}
+            return {"status": "observed", "request": number, "session": "A",
+                    "responseWritten": True, "phase": "before_held_request"}
+        try:
+            release_index = names.index(("hold_release", held_number))
+            held_response_index = names.index(("response_written", held_number))
+        except ValueError:
+            return {"status": "pending", "reason": "held_response_not_written"}
+        if not held_request_index < release_index < held_response_index:
+            return {"status": "invalid", "reason": "held_event_order_invalid"}
+        if (number == held_number or row.get("heldAssistantMarker") != HELD_REPLY
+                or request_index <= held_response_index):
+            return {"status": "invalid", "reason": "not_after_held_response"}
+        return {"status": "observed", "request": number, "session": "A",
+                "responseWritten": response_index is not None, "phase": "after_held_response"}
+    if response_index is None:
+        return {"status": "pending", "reason": "response_not_written"}
+    return {"status": "observed", "request": number, "session": "A",
+            "responseWritten": True, "phase": "idle"}
+
+
 def _owned_daemon_socket(fixture_root, reported_path):
     try:
         root = Path(fixture_root).resolve(strict=True)
@@ -363,6 +427,11 @@ class PilotFixture:
             requests, events = list(self.provider.requests), list(self.provider.events)
         return pilot_evidence(requests, events, idle_reference, busy_reference, self.observation_baseline)
 
+    def progress(self, reference):
+        with self.provider.lock:
+            requests, events = list(self.provider.requests), list(self.provider.events)
+        return pilot_progress(requests, events, reference, self.observation_baseline)
+
     def _read_control_line(self, deadline):
         descriptor = sys.stdin.fileno()
         while time.monotonic() < deadline:
@@ -389,7 +458,7 @@ class PilotFixture:
                 command = json.loads(line)
             except (json.JSONDecodeError, UnicodeDecodeError):
                 raise RuntimeError("invalid_control_json") from None
-            if type(command) is not dict or command.get("command") not in {"status", "start_busy", "release", "evidence", "stop"}:
+            if type(command) is not dict or command.get("command") not in {"status", "start_busy", "release", "progress", "evidence", "stop"}:
                 raise RuntimeError("invalid_control_command")
             name = command["command"]
             if name == "status":
@@ -398,6 +467,8 @@ class PilotFixture:
                 result = self.start_busy()
             elif name == "release":
                 result = self.release()
+            elif name == "progress":
+                result = self.progress(command.get("reference"))
             elif name == "evidence":
                 result = self.evidence(command.get("idleReference"), command.get("busyReference"))
                 if not result["passed"]:
