@@ -116,6 +116,7 @@ WORKER_INTERVAL = 0.5
 WORKER_CONCURRENCY = 4
 WORKER_TIMEOUT = 45
 STOCK_RENEW_INTERVAL = 30
+# Eight pending runtime slots and each runtime's eight watch slots are independent.
 STOCK_RENEW_PENDING_LIMIT = 8
 STOCK_RENEW_BATCH_LIMIT = 3
 STOCK_RENEW_RETRY_INITIAL = 1
@@ -591,6 +592,8 @@ async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: 
                     current = store.get_attachment(item["mapping"]["runtimeId"])
                     if current is not None:
                         watch_candidates[current["runtimeId"]] = current
+            else:
+                suspended.add(fingerprint)
 
         if loop.time() >= next_cloud_poll:
             attachments = store.list_attachments()

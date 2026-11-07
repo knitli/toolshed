@@ -100,8 +100,56 @@ class StockWatchContractAdoptionTests(unittest.IsolatedAsyncioTestCase):
                     await self.client(malformed, [], malformed).stock_watch(
                         by_operation['watch_readback'])
 
+    async def test_watch_deadlines_allow_bounded_client_clock_skew(self):
+        contract = FIXTURES['assignedStockWatch']
+        requests = {}
+        for vector in contract['requests']:
+            if vector['accepted']:
+                requests.setdefault(vector['value']['operation'], vector['value'])
+        # The fixtures put the watch deadline 100 seconds ahead of the client clock.
+        for operation, name in (('watch_list', 'watch-list-page-limit'),
+                                ('watch_renew', 'watch-renew-committed'),
+                                ('watch_readback', 'watch-readback-known')):
+            response = next(vector['value'] for vector in contract['responses']
+                            if vector['name'] == name)
+            with self.subTest(operation=operation):
+                self.assertEqual(await self.client(response, [], response, clock_lag_seconds=100).stock_watch(
+                    requests[operation]), response)
+
+        response = next(vector['value'] for vector in contract['responses']
+                        if vector['name'] == 'watch-readback-known')
+        with self.assertRaisesRegex(CloudError, '^invalid_response$'):
+            await self.client(response, [], response, clock_lag_seconds=121).stock_watch(
+                requests['watch_readback'])
+
+        past_runtime = deepcopy(response)
+        past_runtime['outcome']['watch']['attachment']['leaseUntil'] += 1
+        with self.assertRaisesRegex(CloudError, '^invalid_response$'):
+            await self.client(past_runtime, [], past_runtime).stock_watch(requests['watch_readback'])
+
+    async def test_renewal_and_readback_require_attached_watch_state(self):
+        contract = FIXTURES['assignedStockWatch']
+        requests = {}
+        for vector in contract['requests']:
+            if vector['accepted']:
+                requests.setdefault(vector['value']['operation'], vector['value'])
+        for operation, name in (('watch_renew', 'watch-renew-committed'),
+                                ('watch_readback', 'watch-readback-known')):
+            response = next(vector['value'] for vector in contract['responses']
+                            if vector['name'] == name)
+            for field, value in (('state', 'detached'), ('sourceControl', 'stopped')):
+                malformed = deepcopy(response)
+                watch = malformed['outcome']['watch']
+                if field == 'state':
+                    watch[field] = value
+                else:
+                    watch[field]['mode'] = value
+                with self.subTest(operation=operation, field=field):
+                    with self.assertRaisesRegex(CloudError, '^invalid_response$'):
+                        await self.client(malformed, [], malformed).stock_watch(requests[operation])
+
     @staticmethod
-    def client(response, sent, runtime_value):
+    def client(response, sent, runtime_value, clock_lag_seconds=60):
         runtime = runtime_value['runtime']
         runtime_until = datetime.fromisoformat(runtime['leaseUntil'].replace('Z', '+00:00'))
 
@@ -114,7 +162,8 @@ class StockWatchContractAdoptionTests(unittest.IsolatedAsyncioTestCase):
             node_id=runtime['nodeId'], node_generation=runtime['nodeGeneration'],
             private_key=Ed25519PrivateKey.generate(),
             credentials=lambda: asyncio.sleep(0, result=Credentials(None, 'agent-token')),
-            send=send, auth_mode='gateway', clock=lambda: runtime_until.timestamp() - 60,
+            send=send, auth_mode='gateway',
+            clock=lambda: runtime_until.timestamp() - clock_lag_seconds,
         )
 
 

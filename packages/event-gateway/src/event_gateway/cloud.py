@@ -17,7 +17,7 @@ import uuid
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from .protocol import (
-    ProtocolError, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
+    CLOCK_SKEW_MS, ProtocolError, _depth, _pairs, _timestamp, acknowledgment_matches_delivery,
     matches_delivery_id, parse_acknowledgment, parse_envelope,
     shared_envelope_property,
 )
@@ -975,7 +975,7 @@ def _stock_watch_list_response(outcome, request, runtime, runtime_until, client)
         if (watch["state"] != "attached" or watch["sourceControl"]["mode"] != "watch"
                 or attachment is None
                 or watch_until <= client._clock() * 1000
-                or watch_until > min(runtime_until, client._clock() * 1000 + 90000)
+                or watch_until > min(runtime_until, client._clock() * 1000 + 90000 + CLOCK_SKEW_MS)
                 or attachment["holder"] != {
                     "runtimeId": runtime["runtimeId"],
                     "runtimeGeneration": runtime["runtimeGeneration"],
@@ -1021,8 +1021,9 @@ def _stock_watch_renew_response(outcome, request, runtime, runtime_until, client
                 "nodeId": runtime["nodeId"], "nodeGeneration": runtime["nodeGeneration"]}):
         raise CloudError("invalid_response")
     watch_until = attachment["leaseUntil"]
-    if (watch_until <= client._clock() * 1000
-            or watch_until > min(runtime_until, client._clock() * 1000 + 90000)):
+    if (watch["state"] != "attached" or watch["sourceControl"]["mode"] != "watch"
+            or watch_until <= client._clock() * 1000
+            or watch_until > min(runtime_until, client._clock() * 1000 + 90000 + CLOCK_SKEW_MS)):
         raise CloudError("invalid_response")
 
 
@@ -1037,7 +1038,8 @@ def _stock_watch_readback_response(outcome, request, runtime, runtime_until, cli
     if outcome["status"] == "known":
         watch = _stock_watch_view(outcome["watch"])
         attachment = watch["attachment"]
-        if (watch["subject"] != request["subject"] or attachment is None
+        if (watch["subject"] != request["subject"] or watch["state"] != "attached"
+                or watch["sourceControl"]["mode"] != "watch" or attachment is None
                 or attachment["holder"] != {
                     "runtimeId": runtime["runtimeId"],
                     "runtimeGeneration": runtime["runtimeGeneration"],
@@ -1045,7 +1047,7 @@ def _stock_watch_readback_response(outcome, request, runtime, runtime_until, cli
                     "nodeId": runtime["nodeId"],
                     "nodeGeneration": runtime["nodeGeneration"]}
                 or attachment["leaseUntil"] > min(
-                    runtime_until, client._clock() * 1000 + 90000)):
+                    runtime_until, client._clock() * 1000 + 90000 + CLOCK_SKEW_MS)):
             raise CloudError("invalid_response")
 
 

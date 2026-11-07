@@ -10,7 +10,9 @@ Use the installed Gateway entry point. Put the private state path before the sub
 knitli-event-gateway --state-dir "<PRIVATE_STATE_DIR>" status
 ```
 
-`status` reports local Gateway stage, dispatch state, durable store counts, and aggregate `stockWatchRenewal` association/pending/failure/capacity counts. The daemon renews only watches returned by the owner-scoped cloud list for the exact assigned runtime and conversation; it does not infer watches from PR labels or TUI state and cannot create or reattach one. A pending or failed renewal remains visible in status. Neither these counts nor runtime-status proves that the Codex client received input or started a turn. An ambiguous exact operation is read back; only an explicit unresolved response permits retrying the stored request with its original operation ID. Keep cloud config and credentials private.
+`status` reports local Gateway stage, dispatch state, durable store counts, and aggregate `stockWatchRenewal` association/pending/failure/capacity counts. The daemon renews only watches returned by the owner-scoped cloud list for the exact assigned runtime and conversation; it does not infer watches from PR labels or TUI state and cannot create or reattach one. Watch renewal uses its stored operation ID for exact readback and only retries after an explicit unresolved response. A listing failure is diagnostic and does not settle a pending renewal. Neither these counts nor runtime-status proves that the Codex client received input or started a turn. Keep cloud config and credentials private.
+
+Watch renewal runs in at most eight runtime workers, with at most eight watch-renewal operations in flight per runtime. The durable association limit is 32 across the Gateway state directory; status reports when that fail-closed limit is full. Detached or expired local mappings do not prove what happened to an ambiguous Cloud operation. Preserve its exact pending request until supported owner-side reconciliation settles it; do not edit the database to reclaim capacity.
 
 ## Assign or renew one Codex conversation
 
@@ -32,7 +34,7 @@ knitli-event-gateway --state-dir "<PRIVATE_STATE_DIR>" stock-control renew \
   --cloud-config "<PRIVATE_CLOUD_CONFIG>"
 ```
 
-A replacement `attach` also requires both expected current generations; it advances them. If an operation outcome is unknown, use the existing owner runtime readback and compare the exact profile and generation pair with the stock renewal response. The Gateway `runtime-status` command is for native-bound runtimes and does not establish stock assignment authority. Do not send new conversation input to resolve uncertainty. The daemon renews an existing local stock mapping while running; it does not start, inspect, or reassign client sessions.
+A replacement `attach` also requires both expected current generations; it advances them. If a stock `attach` or `renew` outcome is unknown, the Gateway has no stock-runtime readback command, and `runtime-status` is for native-bound runtimes. Preserve the `unknown` result and have the authority owner reconcile the current runtime, exact profile, and generation pair using a supported authoritative path. A same-generation renewal retry alone does not distinguish a committed request from an unknown outcome. Do not blindly retry, choose new generations, or send new conversation input to resolve uncertainty. If no supported owner readback is available, stop and hand off for reconciliation. The daemon renews an existing local stock mapping while running; it does not start, inspect, or reassign client sessions.
 
 ## Messaging route owner handoff (merged; check the installed profile)
 
