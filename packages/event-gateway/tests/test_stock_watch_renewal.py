@@ -32,7 +32,8 @@ def mapping(now):
     }
 
 
-def watch(now_ms, *, lease_revision=6, subject=SUBJECT, incarnation=5, lease_seconds=90):
+def watch(now_ms, *, lease_revision=6, subject=None, incarnation=5, lease_seconds=90):
+    subject = dict(SUBJECT if subject is None else subject)
     return {
         "subject": subject, "incarnation": incarnation, "routingRevision": 7,
         "lifecycleEpoch": 8, "state": "attached",
@@ -61,6 +62,48 @@ def runtime_response(mapping_value):
 
 
 class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
+    def test_watch_factory_copies_default_subject(self):
+        first = watch(1)
+        second = watch(2)
+        self.assertIsNot(first["subject"], second["subject"])
+        self.assertIsNot(first["subject"], SUBJECT)
+
+    def test_same_stock_mapping_rejects_missing_current_attachment(self):
+        class MissingStore:
+            @staticmethod
+            def get_attachment(_runtime):
+                return None
+
+            @staticmethod
+            def clock():
+                return 1
+
+        class CloudIdentity:
+            principal, agent, node_id, node_generation = "owner@example.com", "codex", NODE, 2
+
+        self.assertFalse(daemon._same_stock_mapping(
+            MissingStore(), mapping(1), CloudIdentity()))
+
+    def test_watch_receipt_match_rejects_missing_or_detached_attachments(self):
+        original = watch(1000)
+        renewed = watch(2000, lease_revision=7)
+        self.assertTrue(daemon._watch_receipt_matches(original, renewed))
+        for value in (None, "missing"):
+            with self.subTest(side="original", attachment=value):
+                candidate = deepcopy(original)
+                if value == "missing":
+                    del candidate["attachment"]
+                else:
+                    candidate["attachment"] = value
+                self.assertFalse(daemon._watch_receipt_matches(candidate, renewed))
+            with self.subTest(side="renewed", attachment=value):
+                candidate = deepcopy(renewed)
+                if value == "missing":
+                    del candidate["attachment"]
+                else:
+                    candidate["attachment"] = value
+                self.assertFalse(daemon._watch_receipt_matches(original, candidate))
+
     async def test_closed_watch_list_response_and_page_bound(self):
         now = time.time()
         attached = mapping(now)
@@ -169,8 +212,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_durable_pending_request_survives_reopen_and_prunes_only_when_settled(self):
         now = [time.time()]
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory:
-            with Store(Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory:
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
                 local = mapping(now[0])
                 initial = watch(int(now[0] * 1000))
                 store.remember_stock_watch(local, initial)
@@ -181,7 +224,7 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                            "expectedRoutingRevision": 7, "expectedLeaseRevision": 6,
                            "leaseMs": 90000}
                 store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
-            with Store(Path(directory), clock=lambda: now[0]) as store:
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
                 row, = store.stock_watch_rows(RUNTIME)
                 self.assertEqual(row["pending"]["request"], request)
                 self.assertEqual(store.prune_stock_watches(RUNTIME, set()), 0)
@@ -192,9 +235,10 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settled_incarnation_churn_stays_within_existing_watch_quota(self):
         now = time.time()
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory), clock=lambda: now) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now) as store:
             local = mapping(now)
+            store.put_attachment(local)
             for incarnation in range(1, 42):
                 current = watch(int(now * 1000), incarnation=incarnation)
                 store.remember_stock_watch(local, current)
@@ -207,13 +251,14 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rows[0]["watch"]["incarnation"], 41)
             self.assertFalse(store.status()["stockWatchRenewal"]["capacity"])
 
-    async def test_two_view_pages_reach_all_32_associations_and_renew_last_page(self):
+    async def test_two_view_pages_recompute_expiry_before_renewal(self):
         now = [time.time()]
         local = mapping(now[0])
+        started = now[0]
         views = [watch(int(now[0] * 1000),
                        subject={"repositoryId": 17, "prNumber": pr},
                        incarnation=1, lease_revision=6,
-                       lease_seconds=20 if pr == 32 else 90)
+                       lease_seconds=74 if pr == 1 else 90)
                  for pr in range(1, 33)]
         list_requests = []
         renew_requests = []
@@ -225,6 +270,7 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             async def stock_watch(self, request):
                 if request["operation"] == "watch_list":
                     list_requests.append(deepcopy(request))
+                    now[0] += 2
                     cursor = request["afterSubject"]
                     offset = 0 if cursor is None else next(
                         index + 1 for index, view in enumerate(views)
@@ -238,26 +284,29 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                     return {"runtime": runtime_response(local),
                             "outcome": {"status": "unresolved", "operationId": request["operationId"]}}
                 renew_requests.append(deepcopy(request))
-                renewed = watch(int(now[0] * 1000), subject=request["subject"],
+                renewed_at = int(now[0] * 1000)
+                renewed = watch(renewed_at, subject=request["subject"],
                                 incarnation=request["expectedWatchIncarnation"],
-                                lease_revision=request["expectedLeaseRevision"] + 1)
+                                lease_revision=request["expectedLeaseRevision"] + 1,
+                                lease_seconds=max(1, int(local["leaseExpiresAt"] - renewed_at / 1000)))
                 return {"runtime": runtime_response(local),
                         "outcome": {"status": "committed", "operationId": request["operationId"],
                                     "watch": renewed}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
             store.put_attachment(local)
             await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
             self.assertEqual(len(list_requests), 16)
             self.assertTrue(all(len(list_requests[index]) == 6 for index in range(16)))
+            self.assertEqual(now[0], started + 32)
             self.assertEqual(len(store.stock_watch_rows(RUNTIME)), 32)
             self.assertEqual(len(renew_requests), 1)
-            self.assertEqual(renew_requests[0]["subject"], views[-1]["subject"])
+            self.assertEqual(renew_requests[0]["subject"], views[0]["subject"])
             self.assertEqual(list_requests[-1]["afterSubject"], views[-3]["subject"])
-            last = next(row for row in store.stock_watch_rows(RUNTIME)
-                        if row["watch"]["subject"] == views[-1]["subject"])
-            self.assertEqual(last["watch"]["attachment"]["leaseRevision"], 7)
+            first = next(row for row in store.stock_watch_rows(RUNTIME)
+                         if row["watch"]["subject"] == views[0]["subject"])
+            self.assertEqual(first["watch"]["attachment"]["leaseRevision"], 7)
 
     async def test_over_quota_listing_does_not_prune_existing_pending_association(self):
         now = [time.time()]
@@ -291,8 +340,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "list", "watches": page,
                                     "nextSubject": next_subject}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
             store.put_attachment(local)
             store.remember_stock_watch(local, existing)
             store.save_stock_watch_request(RUNTIME, existing["subject"], 5, request)
@@ -337,8 +386,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "committed", "operationId": request["operationId"],
                                     "watch": renewed_watch}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
             store.put_attachment(local)
             await asyncio.wait_for(daemon._stock_renewal_worker(store, FakeCloud(), stop), 1)
             self.assertEqual([item[0] for item in order], [
@@ -366,8 +415,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                 watch_entered.set()
                 await asyncio.Future()
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory)) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve()) as store:
             store.put_attachment(mapping(now))
             ready, event = {}, asyncio.Event()
             with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.01):
@@ -411,12 +460,12 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "committed", "operationId": request["operationId"],
                                     "watch": renewed_watch}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory:
-            with Store(Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory:
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
                 store.put_attachment(local)
                 store.remember_stock_watch(local, initial)
                 store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
-            with Store(Path(directory), clock=lambda: now[0]) as store:
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
                 await daemon._renew_stock_watches(store, FakeCloud(), stop, local)
                 self.assertEqual([value["operation"] for value in order], ["watch_readback", "watch_renew"])
                 self.assertEqual(order[1], request)
@@ -457,8 +506,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                                 "outcome": {"status": "known", "operationId": request["operationId"],
                                             "watch": receipt}}
 
-                with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                        Path(directory), clock=lambda: now[0]) as store:
+                with tempfile.TemporaryDirectory() as directory, Store(
+                        Path(directory).resolve(), clock=lambda: now[0]) as store:
                     store.put_attachment(local)
                     store.remember_stock_watch(local, original)
                     store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
@@ -471,6 +520,43 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertEqual(row["pending"]["request"], request)
                         self.assertEqual(row["failure"], "watch_changed")
+
+    async def test_detached_known_receipt_keeps_pending_request_for_replay(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        original = watch(int(now[0] * 1000), lease_revision=6)
+        detached = watch(int(now[0] * 1000), lease_revision=7)
+        detached["attachment"] = None
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 6,
+                   "leaseMs": 90000}
+        stop = asyncio.Event()
+        calls = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                calls.append(value["operation"])
+                stop.set()
+                return {"runtime": runtime_response(local),
+                        "outcome": {"status": "known", "operationId": request["operationId"],
+                                    "watch": detached}}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, original)
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            await daemon._renew_stock_watches(store, FakeCloud(), stop, local)
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(calls, ["watch_readback"])
+            self.assertEqual(row["pending"]["request"], request)
+            self.assertEqual(row["failure"], "watch_changed")
 
     async def test_expired_exact_known_receipt_is_settled_with_expired_failure(self):
         now = [time.time()]
@@ -497,8 +583,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "known", "operationId": request["operationId"],
                                     "watch": receipt}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
             store.put_attachment(local)
             store.remember_stock_watch(local, original)
             store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
@@ -529,8 +615,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             async def stock_watch(self, _request):
                 raise AssertionError("stale mapping must not reach Cloud")
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
             store.put_attachment(changed)
             store.remember_stock_watch(local, initial)
             store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
@@ -560,8 +646,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                 return {"runtime": runtime_response(local),
                         "outcome": {"status": "list", "watches": [], "nextSubject": None}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory:
-            with Store(Path(directory), clock=lambda: now[0]) as store:
+        with tempfile.TemporaryDirectory() as directory:
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
                 store.put_attachment(local)
                 store.remember_stock_watch(local, initial)
                 store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
@@ -608,8 +694,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "committed", "operationId": request["operationId"],
                                     "watch": changed}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory)) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve()) as store:
             store.put_attachment(local)
             await daemon._renew_stock_watches(store, FakeCloud(), stop, local)
             row, = store.stock_watch_rows(RUNTIME)
@@ -640,8 +726,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "committed", "operationId": request["operationId"],
                                     "watch": renewed}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory)) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve()) as store:
             store.put_attachment(local)
             await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
             row, = store.stock_watch_rows(RUNTIME)
@@ -672,8 +758,8 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                         "outcome": {"status": "committed", "operationId": request["operationId"],
                                     "watch": renewed}}
 
-        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
-                Path(directory)) as store:
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve()) as store:
             store.put_attachment(local)
             await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
             row, = store.stock_watch_rows(RUNTIME)

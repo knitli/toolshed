@@ -881,7 +881,7 @@ def _stock_watch_request(value):
         if operation == "watch_renew" and (
                 any(not _generation(value[key]) for key in (
                     "expectedWatchIncarnation", "expectedRoutingRevision", "expectedLeaseRevision"))
-                or type(value["leaseMs"]) is not int or not 1 <= value["leaseMs"] <= 90000):
+                or not _generation(value["leaseMs"]) or value["leaseMs"] > 90000):
             raise CloudError("invalid_request")
     if (not _uuid(value["runtimeId"]) or not _uuid(value["conversationId"])
             or not _generation(value["expectedRuntimeGeneration"])
@@ -938,9 +938,7 @@ def _stock_watch_view(value):
     return value
 
 
-def _stock_watch_response(value, request, client):
-    _closed(value, ("runtime", "outcome"))
-    runtime = value["runtime"]
+def _stock_watch_runtime(runtime, request, client):
     _closed(runtime, ("runtimeProfile", "runtimeId", "runtimeGeneration", "nodeId",
                       "nodeGeneration", "attachmentGeneration", "leaseUntil"))
     expected_profile = {"profile": "assigned_stock_client", "client": "codex",
@@ -961,82 +959,105 @@ def _stock_watch_response(value, request, client):
         raise CloudError("invalid_response") from None
     if runtime_until <= client._clock() * 1000:
         raise CloudError("invalid_response")
+    return runtime_until
+
+
+def _stock_watch_list_response(outcome, request, runtime, runtime_until, client):
+    _closed(outcome, ("status", "watches", "nextSubject"))
+    if outcome["status"] != "list" or not isinstance(outcome["watches"], list) or len(outcome["watches"]) > 2:
+        raise CloudError("invalid_response")
+    subjects = []
+    for watch in outcome["watches"]:
+        _stock_watch_view(watch)
+        subjects.append((watch["subject"]["repositoryId"], watch["subject"]["prNumber"]))
+        attachment = watch["attachment"]
+        watch_until = attachment["leaseUntil"] if attachment is not None else 0
+        if (watch["state"] != "attached" or watch["sourceControl"]["mode"] != "watch"
+                or attachment is None
+                or watch_until <= client._clock() * 1000
+                or watch_until > min(runtime_until, client._clock() * 1000 + 90000)
+                or attachment["holder"] != {
+                    "runtimeId": runtime["runtimeId"],
+                    "runtimeGeneration": runtime["runtimeGeneration"],
+                    "attachmentGeneration": runtime["attachmentGeneration"],
+                    "nodeId": runtime["nodeId"], "nodeGeneration": runtime["nodeGeneration"]}):
+            raise CloudError("invalid_response")
+    if subjects != sorted(set(subjects)):
+        raise CloudError("invalid_response")
+    cursor = request["afterSubject"]
+    if cursor is not None and subjects and subjects[0] <= (cursor["repositoryId"], cursor["prNumber"]):
+        raise CloudError("invalid_response")
+    next_subject = outcome["nextSubject"]
+    if next_subject is not None:
+        _stock_watch_subject(next_subject)
+        if not subjects or next_subject != outcome["watches"][-1]["subject"]:
+            raise CloudError("invalid_response")
+
+
+def _stock_watch_operation_response(outcome, request, runtime, runtime_until, client):
+    if not isinstance(outcome, dict):
+        raise CloudError("invalid_response")
+    if request["operation"] == "watch_renew":
+        _stock_watch_renew_response(outcome, request, runtime, runtime_until, client)
+    else:
+        _stock_watch_readback_response(outcome, request, runtime, runtime_until, client)
+
+
+def _stock_watch_renew_response(outcome, request, runtime, runtime_until, client):
+    _closed(outcome, ("status", "operationId", "watch"))
+    if outcome["operationId"] != request["operationId"] or outcome["status"] != "committed":
+        raise CloudError("invalid_response")
+    watch = _stock_watch_view(outcome["watch"])
+    attachment = watch["attachment"]
+    if (watch["subject"] != request["subject"]
+            or watch["incarnation"] != request["expectedWatchIncarnation"]
+            or watch["routingRevision"] != request["expectedRoutingRevision"]
+            or attachment is None
+            or attachment["leaseRevision"] != request["expectedLeaseRevision"] + 1
+            or attachment["holder"] != {
+                "runtimeId": runtime["runtimeId"],
+                "runtimeGeneration": runtime["runtimeGeneration"],
+                "attachmentGeneration": runtime["attachmentGeneration"],
+                "nodeId": runtime["nodeId"], "nodeGeneration": runtime["nodeGeneration"]}):
+        raise CloudError("invalid_response")
+    watch_until = attachment["leaseUntil"]
+    if (watch_until <= client._clock() * 1000
+            or watch_until > min(runtime_until, client._clock() * 1000 + 90000)):
+        raise CloudError("invalid_response")
+
+
+def _stock_watch_readback_response(outcome, request, runtime, runtime_until, client):
+    fields = ("status", "operationId", "watch") if outcome.get("status") == "known" else (
+        "status", "operationId")
+    _closed(outcome, fields)
+    if outcome["operationId"] != request["operationId"]:
+        raise CloudError("invalid_response")
+    if outcome["status"] not in ("known", "unresolved", "conflict"):
+        raise CloudError("invalid_response")
+    if outcome["status"] == "known":
+        watch = _stock_watch_view(outcome["watch"])
+        attachment = watch["attachment"]
+        if (watch["subject"] != request["subject"] or attachment is None
+                or attachment["holder"] != {
+                    "runtimeId": runtime["runtimeId"],
+                    "runtimeGeneration": runtime["runtimeGeneration"],
+                    "attachmentGeneration": runtime["attachmentGeneration"],
+                    "nodeId": runtime["nodeId"],
+                    "nodeGeneration": runtime["nodeGeneration"]}
+                or attachment["leaseUntil"] > min(
+                    runtime_until, client._clock() * 1000 + 90000)):
+            raise CloudError("invalid_response")
+
+
+def _stock_watch_response(value, request, client):
+    _closed(value, ("runtime", "outcome"))
+    runtime = value["runtime"]
+    runtime_until = _stock_watch_runtime(runtime, request, client)
     outcome = value["outcome"]
     if request["operation"] == "watch_list":
-        _closed(outcome, ("status", "watches", "nextSubject"))
-        if outcome["status"] != "list" or not isinstance(outcome["watches"], list) or len(outcome["watches"]) > 2:
-            raise CloudError("invalid_response")
-        subjects = []
-        for watch in outcome["watches"]:
-            _stock_watch_view(watch)
-            subjects.append((watch["subject"]["repositoryId"], watch["subject"]["prNumber"]))
-            attachment = watch["attachment"]
-            watch_until = attachment["leaseUntil"] if attachment is not None else 0
-            if (watch["state"] != "attached" or watch["sourceControl"]["mode"] != "watch"
-                    or attachment is None
-                    or watch_until <= client._clock() * 1000
-                    or watch_until > min(runtime_until, client._clock() * 1000 + 90000)
-                    or attachment["holder"] != {
-                        "runtimeId": runtime["runtimeId"],
-                        "runtimeGeneration": runtime["runtimeGeneration"],
-                        "attachmentGeneration": runtime["attachmentGeneration"],
-                        "nodeId": runtime["nodeId"], "nodeGeneration": runtime["nodeGeneration"]}):
-                raise CloudError("invalid_response")
-        if subjects != sorted(set(subjects)):
-            raise CloudError("invalid_response")
-        cursor = request["afterSubject"]
-        if cursor is not None and subjects and subjects[0] <= (cursor["repositoryId"], cursor["prNumber"]):
-            raise CloudError("invalid_response")
-        next_subject = outcome["nextSubject"]
-        if next_subject is not None:
-            _stock_watch_subject(next_subject)
-            if not subjects or next_subject != outcome["watches"][-1]["subject"]:
-                raise CloudError("invalid_response")
+        _stock_watch_list_response(outcome, request, runtime, runtime_until, client)
     else:
-        if not isinstance(outcome, dict):
-            raise CloudError("invalid_response")
-        _closed(outcome, ("status", "operationId", "watch") if request["operation"] == "watch_renew"
-                 else ("status", "operationId") if outcome.get("status") != "known"
-                 else ("status", "operationId", "watch"))
-        if outcome["operationId"] != request["operationId"]:
-            raise CloudError("invalid_response")
-        if request["operation"] == "watch_renew":
-            if outcome["status"] != "committed":
-                raise CloudError("invalid_response")
-            watch = _stock_watch_view(outcome["watch"])
-            if (watch["subject"] != request["subject"]
-                    or watch["incarnation"] != request["expectedWatchIncarnation"]
-                    or watch["routingRevision"] != request["expectedRoutingRevision"]
-                    or watch["attachment"] is None
-                    or watch["attachment"]["leaseRevision"] != request["expectedLeaseRevision"] + 1):
-                raise CloudError("invalid_response")
-            holder = watch["attachment"]["holder"]
-            if (holder["runtimeId"] != runtime["runtimeId"]
-                    or holder["runtimeGeneration"] != runtime["runtimeGeneration"]
-                    or holder["attachmentGeneration"] != runtime["attachmentGeneration"]
-                    or holder["nodeId"] != runtime["nodeId"]
-                    or holder["nodeGeneration"] != runtime["nodeGeneration"]):
-                raise CloudError("invalid_response")
-            watch_until = watch["attachment"]["leaseUntil"]
-            if (watch_until <= client._clock() * 1000
-                    or watch_until > min(runtime_until, client._clock() * 1000 + 90000)):
-                raise CloudError("invalid_response")
-        else:
-            if outcome["status"] not in ("known", "unresolved", "conflict"):
-                raise CloudError("invalid_response")
-            if outcome["status"] == "known":
-                watch = _stock_watch_view(outcome["watch"])
-                attachment = watch["attachment"]
-                if (watch["subject"] != request["subject"] or attachment is None
-                        or attachment["holder"] != {
-                            "runtimeId": runtime["runtimeId"],
-                            "runtimeGeneration": runtime["runtimeGeneration"],
-                            "attachmentGeneration": runtime["attachmentGeneration"],
-                            "nodeId": runtime["nodeId"],
-                            "nodeGeneration": runtime["nodeGeneration"]}
-                        or attachment["leaseUntil"] > min(
-                            runtime_until, client._clock() * 1000 + 90000)):
-                    raise CloudError("invalid_response")
+        _stock_watch_operation_response(outcome, request, runtime, runtime_until, client)
     return value
 
 

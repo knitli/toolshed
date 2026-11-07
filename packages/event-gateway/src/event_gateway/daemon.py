@@ -288,6 +288,8 @@ def _same_stock_mapping(store, mapping, cloud):
         current = store.get_attachment(mapping["runtimeId"])
     except (sqlite3.Error, StoreError):
         return False
+    if current is None:
+        return False
     return ({key: value for key, value in current.items() if key != "leaseExpiresAt"}
             == {key: value for key, value in mapping.items() if key != "leaseExpiresAt"}
             and current["leaseExpiresAt"] > store.clock()
@@ -298,6 +300,10 @@ def _same_stock_mapping(store, mapping, cloud):
 
 
 def _watch_receipt_matches(original, renewed):
+    original_attachment = original.get("attachment")
+    renewed_attachment = renewed.get("attachment")
+    if not isinstance(original_attachment, dict) or not isinstance(renewed_attachment, dict):
+        return False
     return (renewed["subject"] == original["subject"]
             and renewed["incarnation"] == original["incarnation"]
             and renewed["routingRevision"] == original["routingRevision"]
@@ -308,10 +314,9 @@ def _watch_receipt_matches(original, renewed):
                   if key not in ("status", "reason")}
                  == {key: value for key, value in original["sourceControl"].items()
                      if key not in ("status", "reason")})
-            and renewed["attachment"]["holder"] == original["attachment"]["holder"]
-            and renewed["attachment"]["leaseRevision"] == original["attachment"]["leaseRevision"] + 1
-            and renewed["attachment"]["leaseUntil"]
-            > original["attachment"]["leaseUntil"])
+            and renewed_attachment["holder"] == original_attachment["holder"]
+            and renewed_attachment["leaseRevision"] == original_attachment["leaseRevision"] + 1
+            and renewed_attachment["leaseUntil"] > original_attachment["leaseUntil"])
 
 
 async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
@@ -319,7 +324,6 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     if not hasattr(store, "stock_watch_rows") or not hasattr(cloud, "stock_watch"):
         return
     runtime = mapping["runtimeId"]
-    now_ms = int(store.clock() * 1000)
 
     async def recover(row):
         pending = row["pending"]
@@ -449,6 +453,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     for watch in listed:
         store.remember_stock_watch(mapping, watch)
         expires = watch["attachment"]["leaseUntil"]
+        now_ms = int(store.clock() * 1000)
         if (expires <= now_ms or expires - now_ms > 45000 or stop.is_set()
                 or not _same_stock_mapping(store, mapping, cloud)):
             continue

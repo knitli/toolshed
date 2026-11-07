@@ -322,11 +322,18 @@ class Store:
         runtime = mapping.get("runtimeId")
         subject = watch.get("subject")
         incarnation = watch.get("incarnation")
+        # These JSON identities must exclude bools and other int subclasses.
         if (not isinstance(runtime, str) or not isinstance(subject, dict)
-                or type(subject.get("repositoryId")) is not int
-                or type(subject.get("prNumber")) is not int
-                or type(incarnation) is not int or incarnation < 1):
+                or type(subject.get("repositoryId")) is not int  # pylint: disable=unidiomatic-typecheck
+                or type(subject.get("prNumber")) is not int  # pylint: disable=unidiomatic-typecheck
+                or type(incarnation) is not int or incarnation < 1):  # pylint: disable=unidiomatic-typecheck
             raise StoreError("invalid_stock_watch")
+        for row in self.db.execute(
+                "SELECT DISTINCT runtime FROM stock_watches").fetchall():
+            tracked_runtime = row[0]
+            attachment = self.get_attachment(tracked_runtime)
+            if attachment is None or attachment["leaseExpiresAt"] <= self.clock():
+                self.prune_stock_watches(tracked_runtime, set())
         key = _json(subject)
         old = self.db.execute(
             "SELECT data FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
