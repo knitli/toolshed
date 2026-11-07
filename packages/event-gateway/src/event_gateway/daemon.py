@@ -470,6 +470,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                 if not previous.done():
                     return previous
                 previous.result()
+
             async def run():
                 async with semaphore:
                     try:
