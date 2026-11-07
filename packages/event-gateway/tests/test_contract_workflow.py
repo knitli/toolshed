@@ -84,7 +84,7 @@ WATCH_NAME = 'assigned-stock-watch-lease-renewal'
 WATCH_EVENT_REVISION = '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa'
 WATCH_CONTROL_REVISION = 'cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49'
 WATCH_ARCHIVE = 'tests/fixtures/assigned-stock-watch-lease-family.zip'
-WATCH_ARCHIVE_SHA256 = 'f27db38aa08a33dc596aa079c0c2440e4dc05463f8ca5282d390db96f8350f1c'
+WATCH_ARCHIVE_SHA256 = '3581f554f7c83ffb8f8d9fdce2753ce959c06fe7a50135f11481385b56e6fdb8'
 WATCH_FAMILY = {'name': 'assigned-stock-watch-lease-renewal',
  'eventRevision': '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa',
  'controlRevision': 'cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49',
@@ -93,8 +93,8 @@ WATCH_FAMILY = {'name': 'assigned-stock-watch-lease-renewal',
             'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
             'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
             'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
-            'event-control-v1/fixtures.json': '0527c67cc768cf2f0376667e8752089b120561cc42c046f2a127f1dd24abba3f',
-            'event-control-v1/manifest.json': '6181e885acff32d31ed2196230c2d6f328336afd900b9ae250e93de596be58fe'}}
+            'event-control-v1/fixtures.json': '0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038',
+            'event-control-v1/manifest.json': '07c44485cca3b81cc7e1b50476606baf0a6c35ebf6395c975e2aed4dc69d12b4'}}
 HISTORICAL_ARCHIVE_SHA256 = "ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879"
 
 

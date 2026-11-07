@@ -151,5 +151,5 @@ merge `cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49`. Its Event v1 snapshot remains 
 and readback request/result vectors. `assigned-stock-watch-lease-family.zip`
 contains the seven snapshots, four Event v1 sources, and 109 control sources.
 The source blobs are pinned under their respective immutable event/control
-revisions. The archive SHA-256 is `f27db38aa08a33dc596aa079c0c2440e4dc05463f8ca5282d390db96f8350f1c`; its prepared fixture SHA-256 is `0527c67cc768cf2f0376667e8752089b120561cc42c046f2a127f1dd24abba3f`. This is trusted provenance only; consumer adoption and live watch
+revisions. The archive SHA-256 is `3581f554f7c83ffb8f8d9fdce2753ce959c06fe7a50135f11481385b56e6fdb8`; its prepared fixture SHA-256 is `0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038`. This is trusted provenance only; consumer adoption and live watch
 renewal qualification remain separate.
