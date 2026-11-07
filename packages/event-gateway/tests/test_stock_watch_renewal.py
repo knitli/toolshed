@@ -846,7 +846,7 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                 stop.set()
                 await asyncio.gather(worker, return_exceptions=True)
 
-    async def test_deferred_capacity_refusal_does_not_cancel_existing_recovery(self):
+    async def test_deferred_capacity_refusal_does_not_cancel_existing_recovery(self):  # noqa: MC0001
         now = [time.time()]
         local = mapping(now[0])
         other_runtime = "42345678-1234-4234-8234-123456789abc"
@@ -1031,7 +1031,6 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                 nonlocal attempts
                 attempts += 1
                 if attempts == 1:
-                    from event_gateway.store import StoreError
                     raise StoreError("storage_unavailable")
                 return renew_attachment(expected, lease_expires_at)
 
