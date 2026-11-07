@@ -246,6 +246,8 @@ def pilot_progress(requests, events, reference, baseline=0):
     if held_rows:
         if len(held_rows) != 1:
             return {"status": "invalid", "reason": "held_request_not_unique"}
+        if held_rows[0].get("sessionMarkers") != [SESSION_A]:
+            return {"status": "invalid", "reason": "wrong_session_or_input"}
         held_number = held_rows[0].get("number")
         try:
             held_request_index = names.index(("request", held_number))
@@ -265,7 +267,7 @@ def pilot_progress(requests, events, reference, baseline=0):
             return {"status": "pending", "reason": "held_response_not_written"}
         if not held_request_index < release_index < held_response_index:
             return {"status": "invalid", "reason": "held_event_order_invalid"}
-        if (number <= held_number or row.get("heldAssistantMarker") != HELD_REPLY
+        if (number == held_number or row.get("heldAssistantMarker") != HELD_REPLY
                 or request_index <= held_response_index):
             return {"status": "invalid", "reason": "not_after_held_response"}
         return {"status": "observed", "request": number, "session": "A",

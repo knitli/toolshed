@@ -297,6 +297,12 @@ class PilotEvidenceTests(unittest.TestCase):
         self.assertNotIn("synthetic busy turn marker", repr(result))
         self.assertNotIn("synthetic held response e3 marker", repr(result))
 
+    def test_progress_rejects_held_request_without_session_a_marker(self):
+        requests, events = _evidence_inputs()
+        requests[1]["sessionMarkers"] = []
+        self.assertEqual(pilot_progress(requests, events, BUSY_REF),
+                         {"status": "invalid", "reason": "wrong_session_or_input"})
+
     def test_progress_rejects_busy_request_before_held_response(self):
         requests, events = _evidence_inputs()
         events.remove({"event": "request", "number": 3})
