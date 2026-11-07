@@ -80,6 +80,21 @@ STOCK_FAMILY = {'name': 'assigned-stock-github-delivery',
             'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
             'event-control-v1/fixtures.json': 'f17a12d3b67094c60f56280258cf43835302e8797a925ca21626f1a95f7e96c1',
             'event-control-v1/manifest.json': '84a90e9ff7b2b6586bf73cc4c23419044d32fb5751201a2baaf65c5cc2eb4bfa'}}
+WATCH_NAME = 'assigned-stock-watch-lease-renewal'
+WATCH_EVENT_REVISION = '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa'
+WATCH_CONTROL_REVISION = 'cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49'
+WATCH_ARCHIVE = 'tests/fixtures/assigned-stock-watch-lease-family.zip'
+WATCH_ARCHIVE_SHA256 = '3581f554f7c83ffb8f8d9fdce2753ce959c06fe7a50135f11481385b56e6fdb8'
+WATCH_FAMILY = {'name': 'assigned-stock-watch-lease-renewal',
+ 'eventRevision': '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa',
+ 'controlRevision': 'cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49',
+ 'hashes': {'event-v1/protocol.schema.json': '4f52187100e98eef2dadbfbe319e41fc0af6aa82ee1c185ec152171d20cbfb23',
+            'event-v1/protocol.ts': 'b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d',
+            'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+            'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
+            'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
+            'event-control-v1/fixtures.json': '0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038',
+            'event-control-v1/manifest.json': '07c44485cca3b81cc7e1b50476606baf0a6c35ebf6395c975e2aed4dc69d12b4'}}
 HISTORICAL_ARCHIVE_SHA256 = "ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879"
 
 
@@ -281,7 +296,10 @@ class ContractWorkflowTests(unittest.TestCase):
 
     def approved_snapshot(self, name):
         # Read immutable data only: no extraction, source evaluation, or Git/network dependency.
-        archive_path = PACKAGE / (STOCK_ARCHIVE if name == STOCK_NAME else "tests/fixtures/trusted-contract-families.zip")
+        archive_path = PACKAGE / {
+            STOCK_NAME: STOCK_ARCHIVE,
+            WATCH_NAME: WATCH_ARCHIVE,
+        }.get(name, "tests/fixtures/trusted-contract-families.zip")
         with zipfile.ZipFile(archive_path) as archive:
             return {SNAPSHOT + path: archive.read(f"snapshots/{name}/{path}") for path in PATHS}
 
@@ -299,8 +317,11 @@ class ContractWorkflowTests(unittest.TestCase):
             historical = json.loads(archive.read("metadata.json"))
         with zipfile.ZipFile(PACKAGE / STOCK_ARCHIVE) as archive:
             stock = json.loads(archive.read("metadata.json"))
+        with zipfile.ZipFile(PACKAGE / WATCH_ARCHIVE) as archive:
+            watch = json.loads(archive.read("metadata.json"))
         self.assertEqual(stock["families"], [STOCK_FAMILY])
-        self.assertEqual(list(POLICY["FAMILIES"]), historical["families"] + [STOCK_FAMILY])
+        self.assertEqual(watch["families"], [WATCH_FAMILY])
+        self.assertEqual(list(POLICY["FAMILIES"]), historical["families"] + [STOCK_FAMILY, WATCH_FAMILY])
         self.assertEqual(len(historical["families"]), 15)
         self.assertEqual(set(historical["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
@@ -311,7 +332,7 @@ class ContractWorkflowTests(unittest.TestCase):
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         self.assertEqual(tuple(POLICY["MESSAGING_V2_PATHS"]), MESSAGING_V2_PATHS)
-        for expected in historical["families"] + [STOCK_FAMILY]:
+        for expected in historical["families"] + [STOCK_FAMILY, WATCH_FAMILY]:
             with self.subTest(family=expected["name"]):
                 self.blobs = self.approved_snapshot(expected["name"])
                 self.reads.clear()
@@ -966,6 +987,52 @@ class ContractWorkflowTests(unittest.TestCase):
             self.assertEqual(names, expected)
             for info in archive.infolist():
                 self.assertEqual(info.date_time, (2026, 10, 20, 0, 0, 0))
+
+    def test_watch_renewal_family_requires_complete_authorization(self):
+        self.assert_complete_family_authorization(WATCH_NAME)
+
+    def test_watch_renewal_family_rejects_each_snapshot_mutation_or_omission(self):
+        self.assert_mutation_or_omission_rejected(WATCH_NAME)
+
+    def test_watch_renewal_family_rejects_each_control_source_hash_mutation_or_omission(self):
+        self.assert_source_hash_mutation_or_omission_rejected(WATCH_NAME)
+
+    def test_watch_renewal_family_exact_source_provenance_and_closed_archive(self):
+        blobs = self.approved_snapshot(WATCH_NAME)
+        event = json.loads(blobs[SNAPSHOT + 'event-v1/manifest.json'])
+        control = json.loads(blobs[SNAPSHOT + 'event-control-v1/manifest.json'])
+        event_sources = {entry['originalPath']: entry['sha256'] for entry in event['files']}
+        self.assertEqual((event['commit'], control['revision']),
+                         (WATCH_EVENT_REVISION, WATCH_CONTROL_REVISION))
+        self.assertEqual(control['zodVersion'], '4.6.5')
+        self.assertEqual(len(event_sources), 4)
+        self.assertEqual(len(control['sources']), 109)
+        self.assertEqual(hashlib.sha256(blobs[SNAPSHOT + 'event-control-v1/fixtures.json']).hexdigest(),
+                         control['fixturesSha256'])
+
+        archive_path = PACKAGE / WATCH_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(), WATCH_ARCHIVE_SHA256)
+        with zipfile.ZipFile(archive_path) as archive:
+            metadata = json.loads(archive.read('metadata.json'))
+            self.assertEqual(metadata['families'], [WATCH_FAMILY])
+            self.assertEqual(metadata['snapshots'], {
+                WATCH_NAME: 'prepared-export:' + WATCH_CONTROL_REVISION,
+            })
+            self.assertEqual(set(metadata['sources']), {WATCH_EVENT_REVISION, WATCH_CONTROL_REVISION})
+            self.assert_archived_sources(archive, WATCH_EVENT_REVISION, event_sources)
+            self.assert_archived_sources(archive, WATCH_CONTROL_REVISION, control['sources'])
+            for entry in event['files']:
+                self.assertEqual(archive.read(f"sources/{WATCH_EVENT_REVISION}/{entry['originalPath']}"),
+                                 blobs[SNAPSHOT + 'event-v1/' + entry['file']])
+            expected = (['metadata.json']
+                        + [f'snapshots/{WATCH_NAME}/{path}' for path in PATHS]
+                        + [f'sources/{WATCH_EVENT_REVISION}/{path}' for path in sorted(event_sources)]
+                        + [f'sources/{WATCH_CONTROL_REVISION}/{path}' for path in sorted(control['sources'])])
+            names = archive.namelist()
+            self.assertEqual(names, expected)
+            self.assertEqual(len(names), len(set(names)))
+            for info in archive.infolist():
+                self.assertEqual(info.date_time, (2026, 11, 7, 0, 0, 0))
 
     def test_checked_in_snapshot_and_fixed_paths(self):
         accepted = self.verify()

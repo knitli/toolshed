@@ -144,3 +144,12 @@ snapshots and unique source blobs, with whole-archive SHA-256
 provenance only; this does not authorize runtime execution, deployment, delivery,
 or production qualification. The historical fifteen-family archive remains
 byte-for-byte pinned at `ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879`.
+
+The `assigned-stock-watch-lease-renewal` family authorizes a separate prepared export for Cloud
+merge `cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49`. Its Event v1 snapshot remains at
+`9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`; the new control snapshot records watch list, renewal,
+and readback request/result vectors. `assigned-stock-watch-lease-family.zip`
+contains the seven snapshots, four Event v1 sources, and 109 control sources.
+The source blobs are pinned under their respective immutable event/control
+revisions. The archive SHA-256 is `3581f554f7c83ffb8f8d9fdce2753ce959c06fe7a50135f11481385b56e6fdb8`; its prepared fixture SHA-256 is `0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038`. This is trusted provenance only; consumer adoption and live watch
+renewal qualification remain separate.
