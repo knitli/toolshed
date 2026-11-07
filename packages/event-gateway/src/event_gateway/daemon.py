@@ -17,7 +17,7 @@ from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
 from .security import SecurityError, _decode
-from .store import Store, StoreError
+from .store import Store, StoreError, _json as _store_json
 
 
 BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated"]
@@ -417,9 +417,31 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             store.fail_stock_watch_request(runtime, row["watch"]["subject"],
                 row["watch"]["incarnation"], request, "watch_unavailable")
 
-    for row in store.stock_watch_rows(runtime):
-        if row["pending"] is not None:
-            await recover(row)
+    async def recover_bounded(rows):
+        if not rows:
+            return
+        remaining = iter(rows)
+
+        async def worker():
+            while True:
+                try:
+                    row = next(remaining)
+                except StopIteration:
+                    return
+                try:
+                    await recover(row)
+                except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
+                    # One watch's transient persistence or protocol failure must
+                    # not cancel recovery for sibling watches.
+                    pass
+
+        async with asyncio.TaskGroup() as tasks:
+            for _ in range(min(STOCK_RENEW_PENDING_LIMIT, len(rows))):
+                tasks.create_task(worker())
+
+    pending_rows = [row for row in store.stock_watch_rows(runtime)
+                    if row["pending"] is not None]
+    await recover_bounded(pending_rows)
     if stop.is_set() or not _same_stock_mapping(store, mapping, cloud):
         return
     cursor = None
@@ -448,8 +470,10 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     if cursor is not None:
         store.mark_stock_watch_listing_failure(runtime, "watch_list_over_quota")
         return
-    active_keys = {(_json(watch["subject"]), watch["incarnation"]) for watch in listed}
+    active_keys = {(_store_json(watch["subject"]), watch["incarnation"])
+                   for watch in listed}
     store.prune_stock_watches(runtime, active_keys)
+    due_rows = []
     for watch in listed:
         store.remember_stock_watch(mapping, watch)
         expires = watch["attachment"]["leaseUntil"]
@@ -462,8 +486,8 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             store.save_stock_watch_request(runtime, watch["subject"], watch["incarnation"], request)
         except StoreError:
             continue
-        row = {"watch": watch, "pending": {"request": request}}
-        await recover(row)
+        due_rows.append({"watch": watch, "pending": {"request": request}})
+    await recover_bounded(due_rows)
 # Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
 async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""

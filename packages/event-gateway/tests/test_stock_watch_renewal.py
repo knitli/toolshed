@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -353,6 +354,216 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(after["watch"], before["watch"])
             self.assertEqual(after["failure"], "watch_list_over_quota")
             self.assertEqual(store.status()["stockWatchRenewal"]["associations"], 1)
+
+    async def test_pending_watch_recovery_is_concurrent_and_bounded(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        watches = [watch(int(now[0] * 1000),
+                         subject={"repositoryId": 17, "prNumber": pr},
+                         lease_seconds=40)
+                   for pr in range(1, 17)]
+        in_flight = maximum_in_flight = 0
+        completed = {}
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, request):
+                nonlocal in_flight, maximum_in_flight
+                if request["operation"] == "watch_readback":
+                    in_flight += 1
+                    maximum_in_flight = max(maximum_in_flight, in_flight)
+                    try:
+                        await asyncio.sleep(0.002)
+                    finally:
+                        in_flight -= 1
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "unresolved",
+                                        "operationId": request["operationId"]}}
+                if request["operation"] == "watch_renew":
+                    original = next(item for item in watches
+                                    if item["subject"] == request["subject"])
+                    renewed = deepcopy(original)
+                    renewed["attachment"]["leaseRevision"] += 1
+                    renewed["attachment"]["leaseUntil"] = int(min(
+                        local["leaseExpiresAt"], now[0] + 90) * 1000)
+                    completed[request["subject"]["prNumber"]] = renewed
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "committed",
+                                        "operationId": request["operationId"],
+                                        "watch": renewed}}
+                return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                        "outcome": {"status": "list", "watches": list(completed.values()),
+                                    "nextSubject": None}}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            for current in watches:
+                store.remember_stock_watch(local, current)
+                request = daemon._watch_request(local, "watch_renew", watch=current)
+                store.save_stock_watch_request(RUNTIME, current["subject"],
+                                               current["incarnation"], request)
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            self.assertGreater(maximum_in_flight, 1)
+            self.assertLessEqual(maximum_in_flight, daemon.STOCK_RENEW_PENDING_LIMIT)
+            self.assertEqual(len(completed), len(watches))
+            self.assertTrue(all(row["pending"] is None
+                                for row in store.stock_watch_rows(RUNTIME)))
+
+    async def test_expected_store_failure_during_recovery_isolated_per_watch(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        watches = [watch(int(now[0] * 1000),
+                         subject={"repositoryId": 17, "prNumber": pr},
+                         lease_seconds=40)
+                   for pr in (1, 2)]
+        listed = []
+        failed_subject = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, request):
+                if request["operation"] == "watch_readback":
+                    current = next(value for value in watches
+                                   if value["subject"] == request["subject"])
+                    receipt = deepcopy(current)
+                    receipt["attachment"]["leaseRevision"] += 1
+                    receipt["attachment"]["leaseUntil"] = int(min(
+                        local["leaseExpiresAt"], now[0] + 90) * 1000)
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "known", "watch": receipt}}
+                return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                        "outcome": {"status": "list", "watches": listed,
+                                    "nextSubject": None}}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            for current in watches:
+                store.remember_stock_watch(local, current)
+                request = daemon._watch_request(local, "watch_renew", watch=current)
+                store.save_stock_watch_request(RUNTIME, current["subject"],
+                                               current["incarnation"], request)
+                visible = deepcopy(current)
+                visible["attachment"]["leaseUntil"] = int(min(
+                    local["leaseExpiresAt"], now[0] + 90) * 1000)
+                listed.append(visible)
+
+            finish = store.finish_stock_watch_request
+
+            def fail_once(runtime, subject, incarnation, request, **kwargs):
+                if not failed_subject:
+                    failed_subject.append(subject)
+                    raise sqlite3.OperationalError("database is locked")
+                return finish(runtime, subject, incarnation, request, **kwargs)
+
+            store.finish_stock_watch_request = fail_once
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            rows = {row["watch"]["subject"]["prNumber"]: row
+                    for row in store.stock_watch_rows(RUNTIME)}
+            self.assertEqual(len(failed_subject), 1)
+            failed_pr = failed_subject[0]["prNumber"]
+            self.assertIsNotNone(rows[failed_pr]["pending"])
+            succeeded = rows[3 - failed_pr]
+            self.assertIsNone(succeeded["pending"])
+            self.assertIsNotNone(succeeded["receipt"])
+
+    async def test_all_32_fresh_due_watches_renew_before_their_45_second_expiry(self):
+        base_now = time.time()
+        now = [base_now]
+
+        def virtual_clock():
+            return now[0]
+
+        local = mapping(base_now)
+        watches = [watch(int(base_now * 1000),
+                         subject={"repositoryId": 17, "prNumber": pr},
+                         lease_seconds=45)
+                   for pr in range(1, 33)]
+        renewed = {}
+        in_flight = maximum_in_flight = 0
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, request):
+                nonlocal in_flight, maximum_in_flight
+                deadline = now[0] + 1
+                in_flight += 1
+                maximum_in_flight = max(maximum_in_flight, in_flight)
+                try:
+                    await asyncio.sleep(0)
+                    now[0] = max(now[0], deadline)
+                finally:
+                    in_flight -= 1
+                if request["operation"] == "watch_list":
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "list", "watches": watches,
+                                        "nextSubject": None}}
+                if request["operation"] == "watch_readback":
+                    return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                            "outcome": {"status": "unresolved",
+                                        "operationId": request["operationId"]}}
+                initial = next(value for value in watches
+                               if value["subject"] == request["subject"])
+                current = deepcopy(initial)
+                current["attachment"]["leaseRevision"] += 1
+                current["attachment"]["leaseUntil"] = int(min(
+                    local["leaseExpiresAt"], now[0] + 90) * 1000)
+                renewed[request["subject"]["prNumber"]] = current
+                return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                        "outcome": {"status": "committed",
+                                    "operationId": request["operationId"],
+                                    "watch": current}}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=virtual_clock) as store:
+            store.put_attachment(local)
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            self.assertEqual(len(renewed), 32)
+            self.assertGreater(maximum_in_flight, 1)
+            self.assertLessEqual(maximum_in_flight, daemon.STOCK_RENEW_PENDING_LIMIT)
+            self.assertLess(now[0] - base_now, 45)
+
+    async def test_list_retains_settled_receipt_and_prunes_obsolete_watch(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        current = watch(int(now[0] * 1000), lease_seconds=90)
+        obsolete = watch(int(now[0] * 1000),
+                         subject={"repositoryId": 17, "prNumber": 99}, lease_seconds=90)
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, request):
+                self.assert_operation = request["operation"]
+                return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                        "outcome": {"status": "list", "watches": [current],
+                                    "nextSubject": None}}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            for value in (current, obsolete):
+                store.remember_stock_watch(local, value)
+                request = daemon._watch_request(local, "watch_renew", watch=value)
+                store.save_stock_watch_request(RUNTIME, value["subject"],
+                                               value["incarnation"], request)
+                store.finish_stock_watch_request(
+                    RUNTIME, value["subject"], value["incarnation"], request,
+                    watch=value, failure="watch_unavailable")
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            rows = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["watch"], current)
+            self.assertIsNotNone(rows[0]["receipt"])
+            self.assertEqual(rows[0]["failure"], "watch_unavailable")
 
     async def test_runtime_cas_precedes_watch_list_and_renewal(self):
         now = [time.time()]
