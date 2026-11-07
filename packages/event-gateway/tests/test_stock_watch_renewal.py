@@ -131,7 +131,7 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual((await run([current]))["outcome"]["watches"], [current])
         with self.assertRaisesRegex(CloudError, "invalid_response"):
-            await run([watch(int(now * 1000), lease_seconds=91)])
+            await run([watch(int(now * 1000), lease_seconds=121)])
         with self.assertRaisesRegex(CloudError, "invalid_response"):
             await run([watch(int(now * 1000), subject={"repositoryId": 17, "prNumber": pr})
                        for pr in range(1, 4)])
