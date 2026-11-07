@@ -343,7 +343,11 @@ async def _expected_stock_watch_task_group():
     """Keep expected watch/store failures local while unexpected failures propagate."""
     try:
         async with asyncio.TaskGroup() as tasks:
-            yield tasks
+            try:
+                yield tasks
+            except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
+                # Handle expected body errors before TaskGroup can cancel sibling recoveries.
+                pass
     except* (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
         pass
 
@@ -463,7 +467,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             except StoreError as error:
                 if error.code == "capacity":
                     return False
-                raise
+                return True
             request = _watch_request(mapping, "watch_renew", watch=watch)
             try:
                 store.save_stock_watch_request(
@@ -541,9 +545,8 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             if not prepare_watch(watch):
                 try:
                     store.remember_stock_watch(mapping, watch)
-                except StoreError as error:
-                    if error.code != "capacity":
-                        raise
+                except StoreError:
+                    pass
 # Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
 async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""
