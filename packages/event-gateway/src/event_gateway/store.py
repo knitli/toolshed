@@ -456,7 +456,7 @@ class Store:
         if value["pending"] is None or value["pending"]["request"] != request:
             return False
         value["failure"] = reason if reason in (
-            "watch_unresolved", "watch_conflict", "watch_expired", "watch_changed",
+            "watch_conflict", "watch_expired", "watch_changed",
             "watch_unavailable", "watch_invalid_response", "runtime_changed",
         ) else "watch_unavailable"
         try:
