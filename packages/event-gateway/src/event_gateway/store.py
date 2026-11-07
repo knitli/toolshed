@@ -156,6 +156,10 @@ class Store:
             self.db.execute(
                 "CREATE INDEX IF NOT EXISTS delivery_state ON deliveries(state)"
             )
+            self.db.execute("""CREATE TABLE IF NOT EXISTS stock_watches (
+                runtime TEXT NOT NULL, subject TEXT NOT NULL, incarnation INTEGER NOT NULL,
+                data TEXT NOT NULL, updated REAL NOT NULL,
+                PRIMARY KEY(runtime, subject, incarnation))""")
             self.db.execute("""CREATE TABLE IF NOT EXISTS attempts (
                 delivery_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
                 state TEXT NOT NULL, envelope TEXT NOT NULL, admission TEXT,
@@ -300,6 +304,189 @@ class Store:
                     (encoded, expected["runtimeId"], _json(expected)),
                 )
                 return cursor.rowcount == 1
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def stock_watch_rows(self, runtime_id):
+        """Return the bounded durable watch associations for one stock runtime."""
+        return [json.loads(row[0]) for row in self.db.execute(
+            "SELECT data FROM stock_watches WHERE runtime=? ORDER BY subject,incarnation",
+            (runtime_id,),
+        )]
+
+    def remember_stock_watch(self, mapping, watch):
+        """Persist one exact owner-listed watch projection, retaining any pending CAS."""
+        if (not isinstance(mapping, dict) or not isinstance(watch, dict)
+                or watch.get("state") != "attached" or watch.get("attachment") is None):
+            raise StoreError("invalid_stock_watch")
+        runtime = mapping.get("runtimeId")
+        subject = watch.get("subject")
+        incarnation = watch.get("incarnation")
+        # These JSON identities must exclude bools and other int subclasses.
+        if (not isinstance(runtime, str) or not isinstance(subject, dict)
+                or type(subject.get("repositoryId")) is not int  # pylint: disable=unidiomatic-typecheck
+                or type(subject.get("prNumber")) is not int  # pylint: disable=unidiomatic-typecheck
+                or type(incarnation) is not int or incarnation < 1):  # pylint: disable=unidiomatic-typecheck
+            raise StoreError("invalid_stock_watch")
+        for row in self.db.execute(
+                "SELECT DISTINCT runtime FROM stock_watches").fetchall():
+            tracked_runtime = row[0]
+            attachment = self.get_attachment(tracked_runtime)
+            if attachment is None or attachment["leaseExpiresAt"] <= self.clock():
+                self.prune_stock_watches(tracked_runtime, set())
+        key = _json(subject)
+        old = self.db.execute(
+            "SELECT data FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
+            (runtime, key, incarnation),
+        ).fetchone()
+        value = json.loads(old[0]) if old else {"watch": watch, "pending": None, "failure": None}
+        value.pop("observed", None)
+        if value["pending"] is None:
+            value["watch"] = watch
+        if len(_json(value).encode()) > 16384:
+            raise StoreError("invalid_stock_watch")
+        try:
+            self._capacity(32768 + len(_json(value).encode()) * 3)
+            with self.db:
+                if old is None:
+                    count = self.db.execute("SELECT COUNT(*) FROM stock_watches").fetchone()[0]
+                    if count >= 32:
+                        raise StoreError("capacity", "stock_watch_capacity")
+                    self.db.execute(
+                        "INSERT INTO stock_watches VALUES(?,?,?,?,?)",
+                        (runtime, key, incarnation, _json(value), self.clock()),
+                    )
+                else:
+                    self.db.execute(
+                        "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
+                        (_json(value), self.clock(), runtime, key, incarnation),
+                    )
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def save_stock_watch_request(self, runtime, subject, incarnation, request):
+        """Durably bind one exact operation to its watch before network transmission."""
+        key = _json(subject)
+        row = self.db.execute(
+            "SELECT data FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
+            (runtime, key, incarnation),
+        ).fetchone()
+        if row is None:
+            raise StoreError("stock_watch_missing")
+        value = json.loads(row[0])
+        if value["pending"] is not None:
+            if value["pending"]["request"] != request:
+                raise StoreError("stock_watch_pending")
+            return value["pending"]
+        pending = {"request": request, "startedAt": self.clock()}
+        value.update(pending=pending, failure=None)
+        try:
+            self._capacity(32768 + len(_json(value).encode()) * 3)
+            with self.db:
+                self.db.execute(
+                    "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
+                    (_json(value), self.clock(), runtime, key, incarnation),
+                )
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+        return pending
+
+    def prune_stock_watches(self, runtime, current_keys):
+        """Drop obsolete settled rows while retaining every pending recovery request."""
+        remove = []
+        for row in self.db.execute(
+                "SELECT subject,incarnation,data FROM stock_watches WHERE runtime=?", (runtime,)):
+            data = json.loads(row[2])
+            key = (row[0], row[1])
+            if key in current_keys:
+                continue
+            pending = data["pending"]
+            if pending is None:
+                remove.append((runtime, row[0], row[1]))
+        if remove:
+            try:
+                with self.db:
+                    self.db.executemany(
+                        "DELETE FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
+                        remove,
+                    )
+            except sqlite3.Error:
+                raise StoreError("storage_unavailable") from None
+        return len(remove)
+
+    def finish_stock_watch_request(self, runtime, subject, incarnation, request, *, watch=None, failure=None):
+        """Record an exact receipt or bounded failure and clear only its matching request."""
+        key = _json(subject)
+        row = self.db.execute(
+            "SELECT data FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
+            (runtime, key, incarnation),
+        ).fetchone()
+        if row is None:
+            return False
+        value = json.loads(row[0])
+        if value["pending"] is None or value["pending"]["request"] != request:
+            return False
+        if watch is not None:
+            value["watch"] = watch
+        value.pop("observed", None)
+        value.update(pending=None, failure=failure,
+                     receipt={"operationId": request.get("operationId"),
+                              "request": request, "watch": watch} if watch is not None else None)
+        try:
+            self._capacity(32768 + len(_json(value).encode()) * 3)
+            with self.db:
+                self.db.execute(
+                    "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
+                    (_json(value), self.clock(), runtime, key, incarnation),
+                )
+            return True
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def fail_stock_watch_request(self, runtime, subject, incarnation, request, reason):
+        """Expose a bounded refusal while preserving the exact ambiguous request."""
+        key = _json(subject)
+        row = self.db.execute(
+            "SELECT data FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
+            (runtime, key, incarnation),
+        ).fetchone()
+        if row is None:
+            return False
+        value = json.loads(row[0])
+        if value["pending"] is None or value["pending"]["request"] != request:
+            return False
+        value["failure"] = reason if reason in (
+            "watch_conflict", "watch_expired", "watch_changed",
+            "watch_unavailable", "watch_invalid_response", "runtime_changed",
+        ) else "watch_unavailable"
+        try:
+            self._capacity(32768 + len(_json(value).encode()) * 3)
+            with self.db:
+                self.db.execute(
+                    "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
+                    (_json(value), self.clock(), runtime, key, incarnation),
+                )
+            return True
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def mark_stock_watch_listing_failure(self, runtime, reason):
+        """Expose one owner-listing failure on known associations without changing pending requests."""
+        if reason not in ("watch_list_invalid_response", "watch_list_unavailable",
+                          "watch_list_over_quota"):
+            reason = "watch_list_unavailable"
+        rows = self.db.execute(
+            "SELECT subject,incarnation,data FROM stock_watches WHERE runtime=?", (runtime,)
+        ).fetchall()
+        try:
+            with self.db:
+                for subject, incarnation, encoded in rows:
+                    value = json.loads(encoded)
+                    value["failure"] = reason
+                    self.db.execute(
+                        "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
+                        (_json(value), self.clock(), runtime, subject, incarnation),
+                    )
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
@@ -1837,10 +2024,22 @@ class Store:
         reason = self.blocked_reason or (
             "pending_capacity" if pending >= self.max_rows else None
         )
+        watch_rows = [json.loads(row[0]) for row in self.db.execute(
+            "SELECT data FROM stock_watches")]
+        watch_failures = {}
+        for row in watch_rows:
+            if row.get("failure"):
+                watch_failures[row["failure"]] = watch_failures.get(row["failure"], 0) + 1
         return {
             "counts": counts,
             "pending": pending,
             "bytes": size,
             "blockedReason": reason,
             "attachments": len(self.list_attachments()),
+            "stockWatchRenewal": {
+                "associations": len(watch_rows),
+                "pending": sum(row["pending"] is not None for row in watch_rows),
+                "failures": watch_failures,
+                "capacity": len(watch_rows) >= 32,
+            },
         }

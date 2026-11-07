@@ -31,7 +31,7 @@ const names = [
   'quarantine-inventory-validation.ts',
 
   'contracts.ts', 'api.ts', 'registry.ts', 'coordinator.ts', 'coordinator-admission.ts',
-  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts', 'assigned-stock-contract.ts',
+  'authority-client.ts', 'protocol.ts', 'policy.ts', 'native-admission-contract.ts', 'assigned-stock-contract.ts', 'assigned-stock-watch-contract.ts',
   'native-runtime-store.ts', 'native-admission-gate.ts', 'github/readback-contract.ts', 'github/event-read-contract.ts',
   'read-authority.ts', 'request-deadline.ts', 'github/host.ts', 'github/controller.ts',
   'github/host-storage-version.ts', 'messaging/protocol-v2.ts',
@@ -125,6 +125,18 @@ const nativeAdmissionSchemas = await import(dataModule(
   source['native-admission-contract.ts'].replace('"zod"', JSON.stringify(zod))));
 // eslint-disable-next-line no-unsanitized/method -- Import the same reviewed, pinned assignment DTO source.
 const stockSchemas = await import(assignedStock);
+const primitiveDeclarations = source['contracts.ts'].match(/^export const (?:uuid|agent|generation) = .*;$/gm);
+if (!primitiveDeclarations || primitiveDeclarations.length !== 3) throw Error('runtime primitive declarations missing');
+const runtimePrimitives = dataModule(`import { z } from ${JSON.stringify(zod)};\n${primitiveDeclarations.join('\n')}`);
+const watchControlInternal = dataModule(source['github/watch-control-internal.ts']
+  .replace("'zod'", JSON.stringify(zod))
+  .replace("'../contracts'", JSON.stringify(runtimePrimitives))
+  .replace("'../assigned-stock-contract'", JSON.stringify(assignedStock)));
+const assignedStockWatch = dataModule(source['assigned-stock-watch-contract.ts']
+  .replace("'zod'", JSON.stringify(zod))
+  .replace("'./assigned-stock-contract'", JSON.stringify(assignedStock))
+  .replace("'./github/watch-control-internal'", JSON.stringify(watchControlInternal)));
+const stockWatchSchemas = await import(assignedStockWatch);
 const canonicalSource = source['registry.ts'].match(/export function canonicalNodeProof\([\s\S]*?\n\}/)[0];
 // eslint-disable-next-line no-unsanitized/method -- Execute the reviewed pinned proof function after the same pre-evaluation checks; regeneration explicitly trusts local source.
 const { canonicalNodeProof } = await import(dataModule(canonicalSource));
@@ -594,8 +606,70 @@ for (const vector of stockRequests) {
     throw Error(`Stock assignment vector disagrees with source: ${vector.name}`);
 }
 stockSchemas.AssignedStockRuntimeResponseSchema.parse(stockResponse);
+const watchSubject = { repositoryId: 123, prNumber: 7 };
+const watchUuid = value => `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`;
+const watchView = { subject: watchSubject, incarnation: 1, routingRevision: 1, lifecycleEpoch: 1,
+  state: 'attached', source: { installationId: 1, grantRevision: 1, mappingRevision: 'm1',
+    policyRevision: 'p1', sourceIncarnation: 1 },
+  attachment: { holder: { runtimeId: nativeIds.runtime, runtimeGeneration: 1,
+    attachmentGeneration: 1, nodeId, nodeGeneration: 1 }, leaseRevision: 1, leaseUntil: Date.parse(nativeLeaseUntil) - 30_000 },
+  sourceControl: { mode: 'watch', status: 'acknowledged', operationId: watchUuid(14),
+    obligationId: nativeIds.challengeProofAttach, reason: null } };
+const watchRenewedView = { ...watchView, attachment: { ...watchView.attachment,
+  leaseRevision: 2, leaseUntil: Date.parse(nativeLeaseUntil) } };
+const watchRuntime = { runtimeProfile: { profile: 'assigned_stock_client', client: 'codex', conversationId: nativeIds.thread },
+  runtimeId: nativeIds.runtime, runtimeGeneration: 1, nodeId, nodeGeneration: 1,
+  attachmentGeneration: 1, leaseUntil: nativeLeaseUntil };
+const watchRequests = [
+  { name: 'watch-list-first-page', value: { operation: 'watch_list', runtimeId: nativeIds.runtime,
+    conversationId: nativeIds.thread, expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1, afterSubject: null }, accepted: true },
+  { name: 'watch-list-after-subject', value: { operation: 'watch_list', runtimeId: nativeIds.runtime,
+    conversationId: nativeIds.thread, expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1, afterSubject: watchSubject }, accepted: true },
+  { name: 'watch-renew-exact-cas', value: { operation: 'watch_renew', runtimeId: nativeIds.runtime,
+    conversationId: nativeIds.thread, expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1,
+    operationId: permitId, subject: watchSubject, expectedWatchIncarnation: 1,
+    expectedRoutingRevision: 1, expectedLeaseRevision: 1, leaseMs: 90_000 }, accepted: true },
+  { name: 'watch-readback', value: { operation: 'watch_readback', runtimeId: nativeIds.runtime,
+    conversationId: nativeIds.thread, expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1,
+    operationId: permitId, subject: watchSubject }, accepted: true },
+  { name: 'watch-lease-over-limit', value: { operation: 'watch_renew', runtimeId: nativeIds.runtime,
+    conversationId: nativeIds.thread, expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1,
+    operationId: permitId, subject: watchSubject, expectedWatchIncarnation: 1,
+    expectedRoutingRevision: 1, expectedLeaseRevision: 1, leaseMs: 90_001 }, accepted: false },
+  { name: 'watch-unknown-field', value: { operation: 'watch_list', runtimeId: nativeIds.runtime,
+    conversationId: nativeIds.thread, expectedRuntimeGeneration: 1, expectedAttachmentGeneration: 1,
+    afterSubject: null, inferFromLabel: true }, accepted: false },
+];
+for (const vector of watchRequests) {
+  if (stockWatchSchemas.AssignedStockWatchRequestSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Assigned-stock watch request vector disagrees with source: ${vector.name}`);
+}
+const watchPageLimit = stockWatchSchemas.ASSIGNED_STOCK_WATCH_PAGE_LIMIT;
+const watchPageViews = Array.from({ length: watchPageLimit }, (_, index) => ({
+  ...watchView, subject: { ...watchSubject, prNumber: watchSubject.prNumber + index },
+  sourceControl: index === 0 ? watchView.sourceControl : { ...watchView.sourceControl,
+    operationId: watchUuid(15), obligationId: watchUuid(16) },
+}));
+const overPageViews = Array.from({ length: watchPageLimit + 1 }, (_, index) => ({
+  ...watchView, subject: { ...watchSubject, prNumber: watchSubject.prNumber + index },
+}));
+const watchResponses = [
+  { name: 'watch-list-page-limit', value: { runtime: watchRuntime,
+    outcome: { status: 'list', watches: watchPageViews, nextSubject: watchPageViews.at(-1).subject } }, accepted: true },
+  { name: 'watch-renew-committed', value: { runtime: watchRuntime, outcome: { status: 'committed', operationId: permitId, watch: watchRenewedView } }, accepted: true },
+  { name: 'watch-readback-known', value: { runtime: watchRuntime, outcome: { status: 'known', operationId: permitId, watch: watchRenewedView } }, accepted: true },
+  { name: 'watch-readback-unresolved', value: { runtime: watchRuntime, outcome: { status: 'unresolved', operationId: permitId } }, accepted: true },
+  { name: 'watch-list-over-page-cap', value: { runtime: watchRuntime,
+    outcome: { status: 'list', watches: overPageViews, nextSubject: null } }, accepted: false },
+];
+for (const vector of watchResponses) {
+  if (stockWatchSchemas.AssignedStockWatchResponseSchema.safeParse(vector.value).success !== vector.accepted)
+    throw Error(`Assigned-stock watch response vector disagrees with source: ${vector.name}`);
+}
+const assignedStockWatchFixture = { requests: watchRequests, responses: watchResponses };
 const fixture = { original, admitted, overBudget, claim,
   assignedStock: { request: stockRequest, requests: stockRequests, response: stockResponse },
+  assignedStockWatch: assignedStockWatchFixture,
   nativeAck,
   nativeAckNodeProof: { principal: nativeAck.principal, binding: nativeAckBinding, body: nativeAckBody, proof,
     canonical: canonicalNodeProof(nativeAck.principal, proof, nativeAckBinding) },

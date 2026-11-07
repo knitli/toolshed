@@ -40,6 +40,7 @@ NEW_SOURCES = (
     'quarantine-inventory-contract.ts',
     'quarantine-inventory-validation.ts',
     'assigned-stock-contract.ts',
+    'assigned-stock-watch-contract.ts',
     'github/event-read-contract.ts',
     '../../authority/src/text.ts',
     '../../gatekeeper-messaging/src/mailbox.ts',
@@ -92,8 +93,8 @@ class ControlExportTests(unittest.TestCase):
     def test_new_sources_are_checked_before_evaluation(self):
         source = EXPORTER.read_text()
         names = re.findall(r"'([^']+)'", source.split('const names = [', 1)[1].split('];', 1)[0])
-        self.assertEqual(len(names), 108)
-        self.assertEqual(len(set(names)), 108)
+        self.assertEqual(len(names), 109)
+        self.assertEqual(len(set(names)), 109)
         for name in NEW_SOURCES:
             self.assertIn(name, names)
         git = shutil.which("git")
