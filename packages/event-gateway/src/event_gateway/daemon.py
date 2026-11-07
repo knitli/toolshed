@@ -319,6 +319,24 @@ def _watch_receipt_matches(original, renewed):
             and renewed_attachment["leaseUntil"] > original_attachment["leaseUntil"])
 
 
+def _stock_watch_page_is_stale(store, runtime, watch):
+    """Reject a page snapshot older than the durable baseline for its watch key."""
+    key = (_store_json(watch["subject"]), watch["incarnation"])
+    row = next((row for row in store.stock_watch_rows(runtime)
+                if (_store_json(row["watch"]["subject"]),
+                    row["watch"]["incarnation"]) == key), None)
+    if row is None:
+        return False
+    if row["pending"] is not None:
+        # Keep the in-flight operation pinned to its original CAS baseline.
+        return True
+    current = row["watch"]
+    current_revision = (current["routingRevision"],
+                        current["attachment"]["leaseRevision"])
+    page_revision = (watch["routingRevision"], watch["attachment"]["leaseRevision"])
+    return current_revision > page_revision
+
+
 async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     """Renew exact owner-listed watch rows after the matching runtime lease CAS."""
     if not hasattr(store, "stock_watch_rows") or not hasattr(cloud, "stock_watch"):
@@ -417,77 +435,99 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             store.fail_stock_watch_request(runtime, row["watch"]["subject"],
                 row["watch"]["incarnation"], request, "watch_unavailable")
 
-    async def recover_bounded(rows):
-        if not rows:
-            return
-        remaining = iter(rows)
+    semaphore = asyncio.Semaphore(STOCK_RENEW_PENDING_LIMIT)
+    scheduled = {}
 
-        async def worker():
-            while True:
-                try:
-                    row = next(remaining)
-                except StopIteration:
-                    return
-                try:
-                    await recover(row)
-                except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
-                    # One watch's transient persistence or protocol failure must
-                    # not cancel recovery for sibling watches.
-                    pass
+    async with asyncio.TaskGroup() as tasks:
+        def prepare_watch(watch):
+            if _stock_watch_page_is_stale(store, runtime, watch):
+                return True
+            expires = watch["attachment"]["leaseUntil"]
+            now_ms = int(store.clock() * 1000)
+            if (expires <= now_ms or expires - now_ms > 45000 or stop.is_set()
+                    or not _same_stock_mapping(store, mapping, cloud)):
+                return False
+            try:
+                store.remember_stock_watch(mapping, watch)
+            except StoreError as error:
+                if error.code == "capacity":
+                    return False
+                raise
+            request = _watch_request(mapping, "watch_renew", watch=watch)
+            try:
+                store.save_stock_watch_request(
+                    runtime, watch["subject"], watch["incarnation"], request,
+                )
+            except StoreError:
+                return True
+            schedule({"watch": watch, "pending": {"request": request}})
+            return True
 
-        async with asyncio.TaskGroup() as tasks:
-            for _ in range(min(STOCK_RENEW_PENDING_LIMIT, len(rows))):
-                tasks.create_task(worker())
+        def schedule(row):
+            key = (_store_json(row["watch"]["subject"]), row["watch"]["incarnation"])
+            previous = scheduled.get(key)
+            if previous is not None:
+                if not previous.done():
+                    return previous
+                previous.result()
+            async def run():
+                async with semaphore:
+                    try:
+                        await recover(row)
+                    except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
+                        # Expected failures stay isolated to this watch; an
+                        # unexpected failure still cancels the TaskGroup.
+                        pass
+            scheduled[key] = tasks.create_task(run())
+            return scheduled[key]
 
-    pending_rows = [row for row in store.stock_watch_rows(runtime)
-                    if row["pending"] is not None]
-    await recover_bounded(pending_rows)
-    if stop.is_set() or not _same_stock_mapping(store, mapping, cloud):
-        return
-    cursor = None
-    listed = []
-    for _ in range(16):
-        request = _watch_request(mapping, "watch_list", after_subject=cursor)
-        try:
-            async with asyncio.timeout(5):
-                result = await cloud.stock_watch(request)
-        except CloudError as error:
-            store.mark_stock_watch_listing_failure(runtime,
-                "watch_list_invalid_response" if error.code == "invalid_response"
-                else "watch_list_unavailable")
+        pending_rows = [row for row in store.stock_watch_rows(runtime)
+                        if row["pending"] is not None]
+        for row in pending_rows:
+            schedule(row)
+        # Give pending recovery a chance to start before the first list RPC,
+        # without waiting for slow recovery before accepting fresh page results.
+        if pending_rows:
+            await asyncio.sleep(0)
+        if stop.is_set() or not _same_stock_mapping(store, mapping, cloud):
             return
-        except TimeoutError:
-            store.mark_stock_watch_listing_failure(runtime, "watch_list_unavailable")
-            return
-        outcome = result["outcome"]
-        listed.extend(outcome["watches"])
-        if len(listed) > 32:
+        cursor = None
+        listed = []
+        deferred_watches = []
+        for _ in range(16):
+            request = _watch_request(mapping, "watch_list", after_subject=cursor)
+            try:
+                async with asyncio.timeout(5):
+                    result = await cloud.stock_watch(request)
+            except CloudError as error:
+                store.mark_stock_watch_listing_failure(runtime,
+                    "watch_list_invalid_response" if error.code == "invalid_response"
+                    else "watch_list_unavailable")
+                return
+            except TimeoutError:
+                store.mark_stock_watch_listing_failure(runtime, "watch_list_unavailable")
+                return
+            outcome = result["outcome"]
+            page = outcome["watches"]
+            listed.extend(page)
+            if len(listed) > 32:
+                store.mark_stock_watch_listing_failure(runtime, "watch_list_over_quota")
+                return
+            for watch in page:
+                if not prepare_watch(watch):
+                    deferred_watches.append(watch)
+            cursor = outcome["nextSubject"]
+            if cursor is None:
+                break
+        if cursor is not None:
             store.mark_stock_watch_listing_failure(runtime, "watch_list_over_quota")
             return
-        cursor = outcome["nextSubject"]
-        if cursor is None:
-            break
-    if cursor is not None:
-        store.mark_stock_watch_listing_failure(runtime, "watch_list_over_quota")
-        return
-    active_keys = {(_store_json(watch["subject"]), watch["incarnation"])
-                   for watch in listed}
-    store.prune_stock_watches(runtime, active_keys)
-    due_rows = []
-    for watch in listed:
-        store.remember_stock_watch(mapping, watch)
-        expires = watch["attachment"]["leaseUntil"]
-        now_ms = int(store.clock() * 1000)
-        if (expires <= now_ms or expires - now_ms > 45000 or stop.is_set()
-                or not _same_stock_mapping(store, mapping, cloud)):
-            continue
-        request = _watch_request(mapping, "watch_renew", watch=watch)
-        try:
-            store.save_stock_watch_request(runtime, watch["subject"], watch["incarnation"], request)
-        except StoreError:
-            continue
-        due_rows.append({"watch": watch, "pending": {"request": request}})
-    await recover_bounded(due_rows)
+        active_keys = {(_store_json(watch["subject"]), watch["incarnation"])
+                       for watch in listed}
+        store.prune_stock_watches(runtime, active_keys)
+        for watch in deferred_watches:
+            if not prepare_watch(watch):
+                store.remember_stock_watch(mapping, watch)
 # Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
 async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""

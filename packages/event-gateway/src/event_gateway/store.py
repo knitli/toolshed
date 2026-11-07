@@ -340,12 +340,9 @@ class Store:
             (runtime, key, incarnation),
         ).fetchone()
         value = json.loads(old[0]) if old else {"watch": watch, "pending": None, "failure": None}
+        value.pop("observed", None)
         if value["pending"] is None:
             value["watch"] = watch
-            value.pop("observed", None)
-        else:
-            # Never replace the CAS baseline while its exact operation is unresolved.
-            value["observed"] = watch
         if len(_json(value).encode()) > 16384:
             raise StoreError("invalid_stock_watch")
         try:
@@ -431,7 +428,7 @@ class Store:
             return False
         if watch is not None:
             value["watch"] = watch
-            value.pop("observed", None)
+        value.pop("observed", None)
         value.update(pending=None, failure=failure,
                      receipt={"operationId": request.get("operationId"),
                               "request": request, "watch": watch} if watch is not None else None)

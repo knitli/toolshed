@@ -29,6 +29,28 @@ def stock_watch(runtime, subject, incarnation=1):
 
 
 class StockWatchStoreCapacityTests(unittest.TestCase):
+    def test_fresh_listing_keeps_pending_watch_and_request_pinned(self):
+        now = time.time()
+        runtime = str(uuid.uuid4())
+        subject = {"repositoryId": 17, "prNumber": 42}
+        initial = stock_watch(runtime, subject)
+        request = {"operation": "watch_renew", "operationId": str(uuid.uuid4())}
+        mapping = stock_mapping(runtime, now + 100)
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now) as store:
+            store.put_attachment(mapping)
+            store.remember_stock_watch(mapping, initial)
+            store.save_stock_watch_request(runtime, subject, 1, request)
+            fresh = {**initial, "routingRevision": 8,
+                     "attachment": {**initial["attachment"], "leaseRevision": 7}}
+
+            store.remember_stock_watch(mapping, fresh)
+
+            row, = store.stock_watch_rows(runtime)
+            self.assertEqual(row["watch"], initial)
+            self.assertEqual(row["pending"]["request"], request)
+            self.assertNotIn("observed", row)
+
     def test_capacity_reclaims_only_settled_rows_from_inactive_runtimes(self):
         now = [time.time()]
         with tempfile.TemporaryDirectory() as directory, Store(
