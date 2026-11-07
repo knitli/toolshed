@@ -791,6 +791,61 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(rows[0]["receipt"])
             self.assertEqual(rows[0]["failure"], "watch_unavailable")
 
+    async def test_watch_capacity_exhaustion_does_not_terminate_worker(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        other_runtime = "42345678-1234-4234-8234-123456789abc"
+        other = dict(mapping(now[0]), runtimeId=other_runtime)
+        due = watch(int(now[0] * 1000),
+                    subject={"repositoryId": 99, "prNumber": 1}, lease_seconds=40)
+        listed = asyncio.Event()
+        cloud_requests = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, request):
+                cloud_requests.append(deepcopy(request))
+                if request["operation"] != "watch_list":
+                    raise AssertionError("capacity must prevent a new watch operation")
+                listed.set()
+                return {"runtime": runtime_response(store.get_attachment(RUNTIME)),
+                        "outcome": {"status": "list", "watches": [due],
+                                    "nextSubject": None}}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.put_attachment(other)
+            for pr in range(1, 33):
+                existing = watch(int(now[0] * 1000),
+                                 subject={"repositoryId": 17, "prNumber": pr})
+                existing["attachment"]["holder"]["runtimeId"] = other_runtime
+                store.remember_stock_watch(other, existing)
+                if pr == 1:
+                    pending = {"operation": "watch_renew", "runtimeId": other_runtime,
+                               "operationId": str(uuid.uuid4()), "subject": existing["subject"]}
+                    store.save_stock_watch_request(other_runtime, existing["subject"],
+                                                   existing["incarnation"], pending)
+            before = store.stock_watch_rows(other_runtime)
+            ready, event, stop = {RUNTIME: local}, asyncio.Event(), asyncio.Event()
+            event.set()
+            worker = asyncio.create_task(daemon._stock_watch_worker(
+                store, FakeCloud(), stop, ready, event))
+            try:
+                await asyncio.wait_for(listed.wait(), 1)
+                for _ in range(20):
+                    await asyncio.sleep(0.001)
+                self.assertFalse(worker.done())
+                self.assertEqual(store.stock_watch_rows(other_runtime), before)
+                self.assertEqual(store.stock_watch_rows(RUNTIME), [])
+                self.assertEqual([value["operation"] for value in cloud_requests],
+                                 ["watch_list"])
+            finally:
+                stop.set()
+                await asyncio.gather(worker, return_exceptions=True)
+
     async def test_runtime_cas_precedes_watch_list_and_renewal(self):
         now = [time.time()]
         local = mapping(now[0])

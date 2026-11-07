@@ -1,6 +1,7 @@
 """Private control daemon with explicitly configured authenticated delivery."""
 
 import asyncio
+from contextlib import asynccontextmanager
 import ipaddress
 import json
 import os
@@ -337,6 +338,16 @@ def _stock_watch_page_is_stale(store, runtime, watch):
     return current_revision > page_revision
 
 
+@asynccontextmanager
+async def _expected_stock_watch_task_group():
+    """Keep expected watch/store failures local while unexpected failures propagate."""
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            yield tasks
+    except* (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
+        pass
+
+
 async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     """Renew exact owner-listed watch rows after the matching runtime lease CAS."""
     if not hasattr(store, "stock_watch_rows") or not hasattr(cloud, "stock_watch"):
@@ -438,7 +449,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     semaphore = asyncio.Semaphore(STOCK_RENEW_PENDING_LIMIT)
     scheduled = {}
 
-    async with asyncio.TaskGroup() as tasks:
+    async with _expected_stock_watch_task_group() as tasks:
         def prepare_watch(watch):
             if _stock_watch_page_is_stale(store, runtime, watch):
                 return True
