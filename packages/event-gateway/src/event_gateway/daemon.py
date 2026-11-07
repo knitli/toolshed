@@ -557,19 +557,19 @@ async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: 
                         "retryAt": loop.time() + STOCK_RENEW_RETRY_INITIAL,
                         "retryDelay": min(STOCK_RENEW_RETRY_INITIAL * 2, STOCK_RENEW_RETRY_MAX),
                     }
-            for current in watch_candidates.values():
-                if not stop.is_set():
-                    if watch_ready is None:
-                        try:
-                            await _renew_stock_watches(store, cloud, stop, current)
-                        except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
-                            # Watch renewal status is isolated from the runtime renewal loop.
-                            pass
-                    else:
-                        ready, event = watch_ready
-                        ready[current["runtimeId"]] = current
-                        event.set()
             next_cloud_poll = loop.time() + STOCK_RENEW_INTERVAL
+        for current in watch_candidates.values():
+            if not stop.is_set():
+                if watch_ready is None:
+                    try:
+                        await _renew_stock_watches(store, cloud, stop, current)
+                    except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
+                        # Watch renewal status is isolated from the runtime renewal loop.
+                        pass
+                else:
+                    ready, event = watch_ready
+                    ready[current["runtimeId"]] = current
+                    event.set()
         wait_for = max(0.001, next_cloud_poll - loop.time())
         if pending:
             wait_for = min(wait_for, min(
@@ -583,23 +583,46 @@ async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: 
 
 async def _stock_watch_worker(store, cloud, stop, ready, event):
     """Renew owner-listed watches away from runtime lease heartbeat timing."""
+    tasks = {}
+
     async def renew(mapping):
         try:
             await _renew_stock_watches(store, cloud, stop, mapping)
         except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
             pass
 
-    while not stop.is_set():
-        try:
-            await asyncio.wait_for(event.wait(), STOCK_RENEW_INTERVAL)
-        except TimeoutError:
-            continue
-        event.clear()
-        mappings = list(ready.values())
-        ready.clear()
-        async with asyncio.TaskGroup() as tasks:
-            for mapping in mappings:
-                tasks.create_task(renew(mapping))
+    event_waiter = asyncio.create_task(event.wait())
+    stop_waiter = asyncio.create_task(stop.wait())
+    try:
+        while not stop.is_set():
+            # Reap finished work first, so a coalesced notification for that
+            # runtime can be launched in this iteration.
+            for runtime_id, task in list(tasks.items()):
+                if task.done():
+                    task.result()  # Observe unexpected failures from renew().
+                    del tasks[runtime_id]
+
+            event.clear()
+            for runtime_id, mapping in list(ready.items()):
+                if runtime_id in tasks or len(tasks) >= STOCK_RENEW_PENDING_LIMIT:
+                    continue
+                del ready[runtime_id]
+                tasks[runtime_id] = asyncio.create_task(renew(mapping))
+
+            if stop.is_set():
+                break
+            waiters = {event_waiter, stop_waiter, *tasks.values()}
+            await asyncio.wait(waiters, timeout=STOCK_RENEW_INTERVAL,
+                               return_when=asyncio.FIRST_COMPLETED)
+            if event_waiter.done() and not stop.is_set():
+                event_waiter = asyncio.create_task(event.wait())
+    finally:
+        owned = [*tasks.values(), event_waiter, stop_waiter]
+        for task in tasks.values():
+            task.cancel()
+        event_waiter.cancel()
+        stop_waiter.cancel()
+        await asyncio.gather(*owned, return_exceptions=True)
 
 
 def _stop_dispatch(dispatch, listener, stop):
@@ -693,6 +716,9 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
                     watch_ready, watch_event = {}, asyncio.Event()
                     stock_watch_worker = asyncio.create_task(
                         _stock_watch_worker(store, cloud, stop, watch_ready, watch_event),
+                    )
+                    stock_watch_worker.add_done_callback(
+                        lambda _task: _stop_dispatch(dispatch, listener, stop),
                     )
                     stock_worker = asyncio.create_task(_stock_renewal_worker(
                         store, cloud, stop, (watch_ready, watch_event),

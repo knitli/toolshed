@@ -1097,6 +1097,57 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dispatch, {"listenerReady": False, "workerRunning": False})
         self.assertTrue(stop.is_set())
 
+    async def test_unexpected_stock_watch_worker_exit_stops_dispatch_listener(self):
+        listeners = []
+
+        class FakeListener:
+            def __init__(self, _gateway):
+                self.stopped = False
+                listeners.append(self)
+
+            async def start(self, *_args):
+                return None
+
+            def stop_accepting(self):
+                self.stopped = True
+
+            async def close(self):
+                return None
+
+        class FakeServer:
+            def close(self):
+                return None
+
+            async def wait_closed(self):
+                return None
+
+        async def failed_watch_worker(*_args):
+            raise RuntimeError("unexpected watch renewal failure")
+
+        async def wait_for_stop(_store, _cloud, stop, *_args):
+            await stop.wait()
+
+        async def wait_for_dispatch(_gateway, stop):
+            await stop.wait()
+
+        async def fake_start_server(*_args, **_kwargs):
+            return FakeServer()
+
+        config = {"stockCodexBinary": "/bin/true", "transportKeys": {},
+                  "listenHost": "127.0.0.1", "listenPort": 0}
+        cloud = type("Cloud", (), {"node_id": "audience"})()
+        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, \
+                patch.object(daemon, "load_dispatch_config", return_value=(config, cloud)), \
+                patch.object(daemon, "Gateway"), patch.object(daemon, "Listener", FakeListener), \
+                patch.object(daemon, "_stock_watch_worker", failed_watch_worker), \
+                patch.object(daemon, "_stock_renewal_worker", wait_for_stop), \
+                patch.object(daemon, "_dispatch_worker", wait_for_dispatch), \
+                patch.object(daemon.asyncio, "start_unix_server", side_effect=fake_start_server), \
+                patch.object(daemon.os, "chmod"):
+            await asyncio.wait_for(daemon.serve(directory, dispatch_config="dispatch.json"), 1)
+        self.assertEqual(len(listeners), 1)
+        self.assertTrue(listeners[0].stopped)
+
     async def test_readiness_waits_for_private_socket_permissions(self):
         start_server = asyncio.start_unix_server
         created, release = asyncio.Event(), asyncio.Event()

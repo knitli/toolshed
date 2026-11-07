@@ -395,6 +395,92 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(order[1][1]["expectedRuntimeGeneration"], 0)
             self.assertEqual(store.stock_watch_rows(RUNTIME)[0]["watch"], renewed_watch)
 
+    async def test_persistence_retry_dispatches_watch_before_next_cloud_poll(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        stop = asyncio.Event()
+        ready, event = {}, asyncio.Event()
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def assigned_stock(self, _request):
+                return {"leaseUntil": _iso(now[0] + 180)}
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+
+            renew_attachment = store.renew_stock_attachment
+            attempts = 0
+
+            def fail_once(expected, lease_expires_at):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    from event_gateway.store import StoreError
+                    raise StoreError("storage_unavailable")
+                return renew_attachment(expected, lease_expires_at)
+
+            store.renew_stock_attachment = fail_once
+            with patch.object(daemon, "STOCK_RENEW_INTERVAL", 30), \
+                    patch.object(daemon, "STOCK_RENEW_RETRY_INITIAL", 0.01), \
+                    patch.object(daemon, "STOCK_RENEW_RETRY_MAX", 0.01):
+                worker = asyncio.create_task(daemon._stock_renewal_worker(
+                    store, FakeCloud(), stop, (ready, event)))
+                try:
+                    await asyncio.wait_for(event.wait(), 1)
+                    self.assertEqual(list(ready), [RUNTIME])
+                    self.assertEqual(attempts, 2)
+                    self.assertGreater(store.get_attachment(RUNTIME)["leaseExpiresAt"],
+                                       now[0] + 179.9)
+                finally:
+                    stop.set()
+                    await asyncio.wait_for(worker, 1)
+
+    async def test_watch_worker_runs_runtimes_independently_coalesces_and_stops(self):
+        first = mapping(time.time())
+        second = dict(first, runtimeId="42345678-1234-4234-8234-123456789abc")
+        first_newer = dict(first, attachmentGeneration=5)
+        ready, event, stop = {RUNTIME: first}, asyncio.Event(), asyncio.Event()
+        entered_a, entered_b = asyncio.Event(), asyncio.Event()
+        release_a = asyncio.Event()
+        calls = []
+
+        async def renew(_store, _cloud, _stop, value):
+            calls.append(value)
+            if value["runtimeId"] == RUNTIME and value["attachmentGeneration"] == 4:
+                entered_a.set()
+                await release_a.wait()
+            elif value["runtimeId"] == RUNTIME:
+                await asyncio.Future()
+            else:
+                entered_b.set()
+                await asyncio.Future()
+
+        with patch.object(daemon, "_renew_stock_watches", renew):
+            worker = asyncio.create_task(daemon._stock_watch_worker(
+                None, None, stop, ready, event))
+            try:
+                await asyncio.wait_for(entered_a.wait(), 1)
+                ready[RUNTIME] = first_newer
+                ready[second["runtimeId"]] = second
+                event.set()
+                await asyncio.wait_for(entered_b.wait(), 1)
+                self.assertEqual(sum(value["runtimeId"] == RUNTIME for value in calls), 1)
+                release_a.set()
+                for _ in range(100):
+                    if any(value.get("attachmentGeneration") == 5 for value in calls):
+                        break
+                    await asyncio.sleep(0.001)
+                self.assertEqual([value.get("attachmentGeneration") for value in calls
+                                  if value["runtimeId"] == RUNTIME], [4, 5])
+            finally:
+                stop.set()
+                await asyncio.wait_for(worker, 1)
+        self.assertTrue(worker.done())
+
     async def test_slow_watch_list_does_not_delay_runtime_heartbeat(self):
         now = time.time()
         stop = asyncio.Event()
