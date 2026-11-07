@@ -8,11 +8,9 @@ Use the installed Gateway entry point. Put the private state path before the sub
 
 ```sh
 knitli-event-gateway --state-dir "<PRIVATE_STATE_DIR>" status
-knitli-event-gateway --state-dir "<PRIVATE_STATE_DIR>" runtime-status \
-  --runtime-id "<RUNTIME_UUID>" --cloud-config "<PRIVATE_CLOUD_CONFIG>"
 ```
 
-`status` reports local Gateway stage, dispatch state, and durable store counts. `runtime-status` reads cloud runtime authority and generation state. Neither proves a Codex client received input. Keep cloud config and credentials private.
+`status` reports local Gateway stage, dispatch state, durable store counts, and aggregate `stockWatchRenewal` association/pending/failure/capacity counts. The daemon renews only watches returned by the owner-scoped cloud list for the exact assigned runtime and conversation; it does not infer watches from PR labels or TUI state and cannot create or reattach one. A pending or failed renewal remains visible in status. An ambiguous exact operation is read back; only an explicit unresolved response permits retrying the stored request with its original operation ID. Keep cloud config and credentials private.
 
 ## Assign or renew one Codex conversation
 
@@ -34,7 +32,7 @@ knitli-event-gateway --state-dir "<PRIVATE_STATE_DIR>" stock-control renew \
   --cloud-config "<PRIVATE_CLOUD_CONFIG>"
 ```
 
-A replacement `attach` also requires both expected current generations; it advances them. If an operation outcome is unknown, read `runtime-status` and reconcile the exact same profile/generation pair. Do not send new conversation input to resolve uncertainty. The daemon renews an existing local stock mapping while running; it does not start, inspect, or reassign client sessions.
+A replacement `attach` also requires both expected current generations; it advances them. If an operation outcome is unknown, use the existing owner runtime readback and compare the exact profile and generation pair with the stock renewal response. The Gateway `runtime-status` command is for native-bound runtimes and does not establish stock assignment authority. Do not send new conversation input to resolve uncertainty. The daemon renews an existing local stock mapping while running; it does not start, inspect, or reassign client sessions.
 
 ## Messaging route owner handoff (merged; check the installed profile)
 
