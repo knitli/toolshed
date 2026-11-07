@@ -310,8 +310,8 @@ def _watch_receipt_matches(original, renewed):
                      if key not in ("status", "reason")})
             and renewed["attachment"]["holder"] == original["attachment"]["holder"]
             and renewed["attachment"]["leaseRevision"] == original["attachment"]["leaseRevision"] + 1
-            and _timestamp(renewed["attachment"]["leaseUntil"])
-            > _timestamp(original["attachment"]["leaseUntil"]))
+            and renewed["attachment"]["leaseUntil"]
+            > original["attachment"]["leaseUntil"])
 
 
 async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
@@ -355,14 +355,11 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             outcome = result["outcome"]
             if outcome["status"] == "known":
                 view = outcome["watch"]
-                if (_watch_receipt_matches(row["watch"], view)
-                        and _timestamp(view["attachment"]["leaseUntil"]) > store.clock() * 1000):
+                if _watch_receipt_matches(row["watch"], view):
+                    failure = ("watch_expired" if view["attachment"]["leaseUntil"]
+                               <= store.clock() * 1000 else None)
                     store.finish_stock_watch_request(runtime, row["watch"]["subject"],
-                        row["watch"]["incarnation"], request, watch=view)
-                    return
-                if _timestamp(view["attachment"]["leaseUntil"]) <= store.clock() * 1000:
-                    store.fail_stock_watch_request(runtime, row["watch"]["subject"],
-                        row["watch"]["incarnation"], request, "watch_expired")
+                        row["watch"]["incarnation"], request, watch=view, failure=failure)
                     return
             elif outcome["status"] == "conflict":
                 store.fail_stock_watch_request(runtime, row["watch"]["subject"],
@@ -387,7 +384,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
             return
         if (not _same_stock_mapping(store, mapping, cloud) or stop.is_set()
                 or row["watch"]["attachment"] is None
-                or _timestamp(row["watch"]["attachment"]["leaseUntil"]) <= store.clock() * 1000):
+                or row["watch"]["attachment"]["leaseUntil"] <= store.clock() * 1000):
             store.fail_stock_watch_request(runtime, row["watch"]["subject"],
                 row["watch"]["incarnation"], request, "watch_expired")
             return
@@ -451,7 +448,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     store.prune_stock_watches(runtime, active_keys)
     for watch in listed:
         store.remember_stock_watch(mapping, watch)
-        expires = _timestamp(watch["attachment"]["leaseUntil"])
+        expires = watch["attachment"]["leaseUntil"]
         if (expires <= now_ms or expires - now_ms > 45000 or stop.is_set()
                 or not _same_stock_mapping(store, mapping, cloud)):
             continue

@@ -388,7 +388,7 @@ class Store:
         return pending
 
     def prune_stock_watches(self, runtime, current_keys):
-        """Drop obsolete settled rows and pending requests past their maximum lease horizon."""
+        """Drop obsolete settled rows while retaining every pending recovery request."""
         remove = []
         for row in self.db.execute(
                 "SELECT subject,incarnation,data FROM stock_watches WHERE runtime=?", (runtime,)):

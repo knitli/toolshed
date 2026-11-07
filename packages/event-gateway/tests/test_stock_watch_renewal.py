@@ -36,12 +36,12 @@ def watch(now_ms, *, lease_revision=6, subject=SUBJECT, incarnation=5, lease_sec
     return {
         "subject": subject, "incarnation": incarnation, "routingRevision": 7,
         "lifecycleEpoch": 8, "state": "attached",
-        "source": {"installationId": 9, "grantRevision": 10, "mappingRevision": 11,
-                   "policyRevision": 12, "sourceIncarnation": 13},
+        "source": {"installationId": 9, "grantRevision": 10, "mappingRevision": "m11",
+                   "policyRevision": "p12", "sourceIncarnation": 13},
         "attachment": {
             "holder": {"runtimeId": RUNTIME, "runtimeGeneration": 3,
                        "attachmentGeneration": 4, "nodeId": NODE, "nodeGeneration": 2},
-            "leaseRevision": lease_revision, "leaseUntil": _iso(now_ms / 1000 + lease_seconds),
+            "leaseRevision": lease_revision, "leaseUntil": now_ms + lease_seconds * 1000,
         },
         "sourceControl": {"mode": "watch", "status": "acknowledged",
                            "operationId": "42345678-1234-4234-8234-123456789abc",
@@ -92,6 +92,41 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             await run([watch(int(now * 1000), subject={"repositoryId": 17, "prNumber": pr})
                        for pr in range(1, 4)])
 
+    async def test_watch_source_revisions_are_bounded_nonempty_strings(self):
+        now = time.time()
+        attached = mapping(now)
+        current = watch(int(now * 1000))
+
+        async def run(view):
+            async def send(**_request):
+                value = {"runtime": runtime_response(attached),
+                         "outcome": {"status": "list", "watches": [view],
+                                     "nextSubject": view["subject"]}}
+                return 200, {"content-type": "application/json"}, json.dumps(value).encode()
+
+            client = CloudClient(
+                origin="https://events.example.com", principal="owner@example.com",
+                agent="codex", node_id=NODE, node_generation=2,
+                private_key=Ed25519PrivateKey.generate(),
+                credentials=lambda: asyncio.sleep(0, result=Credentials(None, "agent-token")), send=send,
+                auth_mode="gateway", clock=lambda: now,
+            )
+            request = {"operation": "watch_list", "runtimeId": RUNTIME,
+                       "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                       "expectedAttachmentGeneration": 4, "afterSubject": None}
+            return await client.stock_watch(request)
+
+        for key in ("mappingRevision", "policyRevision"):
+            valid_boundary = deepcopy(current)
+            valid_boundary["source"][key] = "x" * 128
+            await run(valid_boundary)
+            for invalid in (0, "", "x" * 129):
+                with self.subTest(field=key, value=invalid):
+                    malformed = deepcopy(current)
+                    malformed["source"][key] = invalid
+                    with self.assertRaisesRegex(CloudError, "invalid_response"):
+                        await run(malformed)
+
     async def test_watch_renew_response_requires_new_lease_revision_and_exact_holder(self):
         now = time.time()
         local = mapping(now)
@@ -128,7 +163,7 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(CloudError, "invalid_response"):
             await call(wrong_holder)
         expired = deepcopy(current)
-        expired["attachment"]["leaseUntil"] = _iso(now - 1)
+        expired["attachment"]["leaseUntil"] = int((now - 1) * 1000)
         with self.assertRaisesRegex(CloudError, "invalid_response"):
             await call(expired)
 
@@ -436,6 +471,44 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertEqual(row["pending"]["request"], request)
                         self.assertEqual(row["failure"], "watch_changed")
+
+    async def test_expired_exact_known_receipt_is_settled_with_expired_failure(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        original = watch(int(now[0] * 1000), lease_revision=6, lease_seconds=-10)
+        receipt = watch(int(now[0] * 1000), lease_revision=7, lease_seconds=-5)
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 6,
+                   "leaseMs": 90000}
+        stop = asyncio.Event()
+        calls = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                calls.append(value["operation"])
+                stop.set()
+                return {"runtime": runtime_response(local),
+                        "outcome": {"status": "known", "operationId": request["operationId"],
+                                    "watch": receipt}}
+
+        with tempfile.TemporaryDirectory(dir=Path("/tmp").resolve()) as directory, Store(
+                Path(directory), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, original)
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            await daemon._renew_stock_watches(store, FakeCloud(), stop, local)
+            self.assertEqual(calls, ["watch_readback"])
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertIsNone(row["pending"])
+            self.assertEqual(row["failure"], "watch_expired")
+            self.assertEqual(row["receipt"], {"operationId": request["operationId"],
+                                               "request": request, "watch": receipt})
 
     async def test_changed_mapping_never_reuses_old_pending_request(self):
         now = [time.time()]

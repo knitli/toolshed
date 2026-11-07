@@ -161,6 +161,475 @@
       "leaseUntil": "2026-10-09T12:02:28.100Z"
     }
   },
+  "assignedStockWatch": {
+    "requests": [
+      {
+        "name": "watch-list-first-page",
+        "value": {
+          "operation": "watch_list",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "afterSubject": null
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-list-after-subject",
+        "value": {
+          "operation": "watch_list",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "afterSubject": {
+            "repositoryId": 123,
+            "prNumber": 7
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-renew-exact-cas",
+        "value": {
+          "operation": "watch_renew",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "operationId": "00000000-0000-4000-8000-000000000002",
+          "subject": {
+            "repositoryId": 123,
+            "prNumber": 7
+          },
+          "expectedWatchIncarnation": 1,
+          "expectedRoutingRevision": 1,
+          "expectedLeaseRevision": 1,
+          "leaseMs": 90000
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-readback",
+        "value": {
+          "operation": "watch_readback",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "operationId": "00000000-0000-4000-8000-000000000002",
+          "subject": {
+            "repositoryId": 123,
+            "prNumber": 7
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-lease-over-limit",
+        "value": {
+          "operation": "watch_renew",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "operationId": "00000000-0000-4000-8000-000000000002",
+          "subject": {
+            "repositoryId": 123,
+            "prNumber": 7
+          },
+          "expectedWatchIncarnation": 1,
+          "expectedRoutingRevision": 1,
+          "expectedLeaseRevision": 1,
+          "leaseMs": 90001
+        },
+        "accepted": false
+      },
+      {
+        "name": "watch-unknown-field",
+        "value": {
+          "operation": "watch_list",
+          "runtimeId": "00000000-0000-4000-8000-000000000003",
+          "conversationId": "00000000-0000-4000-8000-000000000011",
+          "expectedRuntimeGeneration": 1,
+          "expectedAttachmentGeneration": 1,
+          "afterSubject": null,
+          "inferFromLabel": true
+        },
+        "accepted": false
+      }
+    ],
+    "responses": [
+      {
+        "name": "watch-list-page-limit",
+        "value": {
+          "runtime": {
+            "runtimeProfile": {
+              "profile": "assigned_stock_client",
+              "client": "codex",
+              "conversationId": "00000000-0000-4000-8000-000000000011"
+            },
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 1,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 1,
+            "leaseUntil": "2026-10-09T12:02:28.100Z"
+          },
+          "outcome": {
+            "status": "list",
+            "watches": [
+              {
+                "subject": {
+                  "repositoryId": 123,
+                  "prNumber": 7
+                },
+                "incarnation": 1,
+                "routingRevision": 1,
+                "lifecycleEpoch": 1,
+                "state": "attached",
+                "source": {
+                  "installationId": 1,
+                  "grantRevision": 1,
+                  "mappingRevision": "m1",
+                  "policyRevision": "p1",
+                  "sourceIncarnation": 1
+                },
+                "attachment": {
+                  "holder": {
+                    "runtimeId": "00000000-0000-4000-8000-000000000003",
+                    "runtimeGeneration": 1,
+                    "attachmentGeneration": 1,
+                    "nodeId": "00000000-0000-4000-8000-000000000001",
+                    "nodeGeneration": 1
+                  },
+                  "leaseRevision": 1,
+                  "leaseUntil": 1791547318100
+                },
+                "sourceControl": {
+                  "mode": "watch",
+                  "status": "acknowledged",
+                  "operationId": "00000000-0000-4000-8000-000000000014",
+                  "obligationId": "00000000-0000-4000-8000-000000000013",
+                  "reason": null
+                }
+              },
+              {
+                "subject": {
+                  "repositoryId": 123,
+                  "prNumber": 8
+                },
+                "incarnation": 1,
+                "routingRevision": 1,
+                "lifecycleEpoch": 1,
+                "state": "attached",
+                "source": {
+                  "installationId": 1,
+                  "grantRevision": 1,
+                  "mappingRevision": "m1",
+                  "policyRevision": "p1",
+                  "sourceIncarnation": 1
+                },
+                "attachment": {
+                  "holder": {
+                    "runtimeId": "00000000-0000-4000-8000-000000000003",
+                    "runtimeGeneration": 1,
+                    "attachmentGeneration": 1,
+                    "nodeId": "00000000-0000-4000-8000-000000000001",
+                    "nodeGeneration": 1
+                  },
+                  "leaseRevision": 1,
+                  "leaseUntil": 1791547318100
+                },
+                "sourceControl": {
+                  "mode": "watch",
+                  "status": "acknowledged",
+                  "operationId": "00000000-0000-4000-8000-000000000015",
+                  "obligationId": "00000000-0000-4000-8000-000000000016",
+                  "reason": null
+                }
+              }
+            ],
+            "nextSubject": {
+              "repositoryId": 123,
+              "prNumber": 8
+            }
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-renew-committed",
+        "value": {
+          "runtime": {
+            "runtimeProfile": {
+              "profile": "assigned_stock_client",
+              "client": "codex",
+              "conversationId": "00000000-0000-4000-8000-000000000011"
+            },
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 1,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 1,
+            "leaseUntil": "2026-10-09T12:02:28.100Z"
+          },
+          "outcome": {
+            "status": "committed",
+            "operationId": "00000000-0000-4000-8000-000000000002",
+            "watch": {
+              "subject": {
+                "repositoryId": 123,
+                "prNumber": 7
+              },
+              "incarnation": 1,
+              "routingRevision": 1,
+              "lifecycleEpoch": 1,
+              "state": "attached",
+              "source": {
+                "installationId": 1,
+                "grantRevision": 1,
+                "mappingRevision": "m1",
+                "policyRevision": "p1",
+                "sourceIncarnation": 1
+              },
+              "attachment": {
+                "holder": {
+                  "runtimeId": "00000000-0000-4000-8000-000000000003",
+                  "runtimeGeneration": 1,
+                  "attachmentGeneration": 1,
+                  "nodeId": "00000000-0000-4000-8000-000000000001",
+                  "nodeGeneration": 1
+                },
+                "leaseRevision": 2,
+                "leaseUntil": 1791547348100
+              },
+              "sourceControl": {
+                "mode": "watch",
+                "status": "acknowledged",
+                "operationId": "00000000-0000-4000-8000-000000000014",
+                "obligationId": "00000000-0000-4000-8000-000000000013",
+                "reason": null
+              }
+            }
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-readback-known",
+        "value": {
+          "runtime": {
+            "runtimeProfile": {
+              "profile": "assigned_stock_client",
+              "client": "codex",
+              "conversationId": "00000000-0000-4000-8000-000000000011"
+            },
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 1,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 1,
+            "leaseUntil": "2026-10-09T12:02:28.100Z"
+          },
+          "outcome": {
+            "status": "known",
+            "operationId": "00000000-0000-4000-8000-000000000002",
+            "watch": {
+              "subject": {
+                "repositoryId": 123,
+                "prNumber": 7
+              },
+              "incarnation": 1,
+              "routingRevision": 1,
+              "lifecycleEpoch": 1,
+              "state": "attached",
+              "source": {
+                "installationId": 1,
+                "grantRevision": 1,
+                "mappingRevision": "m1",
+                "policyRevision": "p1",
+                "sourceIncarnation": 1
+              },
+              "attachment": {
+                "holder": {
+                  "runtimeId": "00000000-0000-4000-8000-000000000003",
+                  "runtimeGeneration": 1,
+                  "attachmentGeneration": 1,
+                  "nodeId": "00000000-0000-4000-8000-000000000001",
+                  "nodeGeneration": 1
+                },
+                "leaseRevision": 2,
+                "leaseUntil": 1791547348100
+              },
+              "sourceControl": {
+                "mode": "watch",
+                "status": "acknowledged",
+                "operationId": "00000000-0000-4000-8000-000000000014",
+                "obligationId": "00000000-0000-4000-8000-000000000013",
+                "reason": null
+              }
+            }
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-readback-unresolved",
+        "value": {
+          "runtime": {
+            "runtimeProfile": {
+              "profile": "assigned_stock_client",
+              "client": "codex",
+              "conversationId": "00000000-0000-4000-8000-000000000011"
+            },
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 1,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 1,
+            "leaseUntil": "2026-10-09T12:02:28.100Z"
+          },
+          "outcome": {
+            "status": "unresolved",
+            "operationId": "00000000-0000-4000-8000-000000000002"
+          }
+        },
+        "accepted": true
+      },
+      {
+        "name": "watch-list-over-page-cap",
+        "value": {
+          "runtime": {
+            "runtimeProfile": {
+              "profile": "assigned_stock_client",
+              "client": "codex",
+              "conversationId": "00000000-0000-4000-8000-000000000011"
+            },
+            "runtimeId": "00000000-0000-4000-8000-000000000003",
+            "runtimeGeneration": 1,
+            "nodeId": "00000000-0000-4000-8000-000000000001",
+            "nodeGeneration": 1,
+            "attachmentGeneration": 1,
+            "leaseUntil": "2026-10-09T12:02:28.100Z"
+          },
+          "outcome": {
+            "status": "list",
+            "watches": [
+              {
+                "subject": {
+                  "repositoryId": 123,
+                  "prNumber": 7
+                },
+                "incarnation": 1,
+                "routingRevision": 1,
+                "lifecycleEpoch": 1,
+                "state": "attached",
+                "source": {
+                  "installationId": 1,
+                  "grantRevision": 1,
+                  "mappingRevision": "m1",
+                  "policyRevision": "p1",
+                  "sourceIncarnation": 1
+                },
+                "attachment": {
+                  "holder": {
+                    "runtimeId": "00000000-0000-4000-8000-000000000003",
+                    "runtimeGeneration": 1,
+                    "attachmentGeneration": 1,
+                    "nodeId": "00000000-0000-4000-8000-000000000001",
+                    "nodeGeneration": 1
+                  },
+                  "leaseRevision": 1,
+                  "leaseUntil": 1791547318100
+                },
+                "sourceControl": {
+                  "mode": "watch",
+                  "status": "acknowledged",
+                  "operationId": "00000000-0000-4000-8000-000000000014",
+                  "obligationId": "00000000-0000-4000-8000-000000000013",
+                  "reason": null
+                }
+              },
+              {
+                "subject": {
+                  "repositoryId": 123,
+                  "prNumber": 8
+                },
+                "incarnation": 1,
+                "routingRevision": 1,
+                "lifecycleEpoch": 1,
+                "state": "attached",
+                "source": {
+                  "installationId": 1,
+                  "grantRevision": 1,
+                  "mappingRevision": "m1",
+                  "policyRevision": "p1",
+                  "sourceIncarnation": 1
+                },
+                "attachment": {
+                  "holder": {
+                    "runtimeId": "00000000-0000-4000-8000-000000000003",
+                    "runtimeGeneration": 1,
+                    "attachmentGeneration": 1,
+                    "nodeId": "00000000-0000-4000-8000-000000000001",
+                    "nodeGeneration": 1
+                  },
+                  "leaseRevision": 1,
+                  "leaseUntil": 1791547318100
+                },
+                "sourceControl": {
+                  "mode": "watch",
+                  "status": "acknowledged",
+                  "operationId": "00000000-0000-4000-8000-000000000014",
+                  "obligationId": "00000000-0000-4000-8000-000000000013",
+                  "reason": null
+                }
+              },
+              {
+                "subject": {
+                  "repositoryId": 123,
+                  "prNumber": 9
+                },
+                "incarnation": 1,
+                "routingRevision": 1,
+                "lifecycleEpoch": 1,
+                "state": "attached",
+                "source": {
+                  "installationId": 1,
+                  "grantRevision": 1,
+                  "mappingRevision": "m1",
+                  "policyRevision": "p1",
+                  "sourceIncarnation": 1
+                },
+                "attachment": {
+                  "holder": {
+                    "runtimeId": "00000000-0000-4000-8000-000000000003",
+                    "runtimeGeneration": 1,
+                    "attachmentGeneration": 1,
+                    "nodeId": "00000000-0000-4000-8000-000000000001",
+                    "nodeGeneration": 1
+                  },
+                  "leaseRevision": 1,
+                  "leaseUntil": 1791547318100
+                },
+                "sourceControl": {
+                  "mode": "watch",
+                  "status": "acknowledged",
+                  "operationId": "00000000-0000-4000-8000-000000000014",
+                  "obligationId": "00000000-0000-4000-8000-000000000013",
+                  "reason": null
+                }
+              }
+            ],
+            "nextSubject": null
+          }
+        },
+        "accepted": false
+      }
+    ]
+  },
   "nativeAck": {
     "schemaVersion": 1,
     "eventId": "018e2c70-7c6a-7a01-8000-000000000001",
