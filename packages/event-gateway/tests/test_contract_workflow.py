@@ -989,11 +989,7 @@ class ContractWorkflowTests(unittest.TestCase):
                 self.assertEqual(info.date_time, (2026, 10, 20, 0, 0, 0))
 
     def test_watch_renewal_family_requires_complete_authorization(self):
-        self.blobs = self.approved_snapshot(WATCH_NAME)
-        self.assertEqual(self.verify(), WATCH_NAME)
-        previous = tuple(entry for entry in POLICY['FAMILIES'] if entry['name'] != WATCH_NAME)
-        with self.assertRaisesRegex(ValueError, 'contract family not authorized'):
-            self.verify(previous)
+        self.assert_complete_family_authorization(WATCH_NAME)
 
     def test_watch_renewal_family_rejects_each_snapshot_mutation_or_omission(self):
         self.assert_mutation_or_omission_rejected(WATCH_NAME)
