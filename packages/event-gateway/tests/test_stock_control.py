@@ -19,11 +19,12 @@ from event_gateway.gateway import Gateway
 from event_gateway import messaging_protocol_v2
 from event_gateway.protocol import derive_delivery_id
 from event_gateway.security import sign
-from event_gateway.store import Store
+from event_gateway.store import Store, StoreError
 
 
 RUNTIME = "12345678-1234-4234-8234-123456789abc"
 CONVERSATION = "22345678-1234-4234-8234-123456789abc"
+NEW_CONVERSATION = "42345678-1234-4234-8234-123456789abc"
 NODE = "32345678-1234-4234-8234-123456789abc"
 PROFILE = {"profile": "assigned_stock_client", "client": "codex",
            "conversationId": CONVERSATION}
@@ -40,6 +41,240 @@ def response(status="attached", **changes):
 
 
 class StockControlTests(unittest.IsolatedAsyncioTestCase):
+    def test_cloud_confirmed_stock_reattach_replaces_stale_messaging_mapping(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            old = self._messaging_mapping(now + 30)
+            with Store(state, clock=lambda: now) as store:
+                store.put_messaging_attachment(old)
+                store.detach(RUNTIME)
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                node_id, node_generation = NODE, 2
+
+                async def assigned_stock(self, request):
+                    self.assert_request = request
+                    return response(runtimeGeneration=2, attachmentGeneration=2,
+                                    runtimeProfile={**PROFILE, "conversationId": NEW_CONVERSATION},
+                                    leaseUntil=_iso(now + 120))
+
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), \
+                    redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            self.assertEqual(code, 0, output.getvalue())
+            with Store(state, clock=lambda: now) as store:
+                mapping = store.get_attachment(RUNTIME)
+            self.assertEqual((mapping["runtimeGeneration"], mapping["attachmentGeneration"]), (2, 2))
+            self.assertNotIn("routingGeneration", mapping)
+
+    def test_plain_stock_reattach_keeps_existing_explicit_generation_path(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            with Store(state, clock=lambda: now) as store:
+                store.put_attachment(self._stock_mapping(now + 30))
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+
+                async def assigned_stock(self, _request):
+                    return response(runtimeGeneration=2, attachmentGeneration=2,
+                                    runtimeProfile={**PROFILE, "conversationId": NEW_CONVERSATION},
+                                    leaseUntil=_iso(now + 120))
+
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            self.assertEqual(code, 0, output.getvalue())
+            with Store(state, clock=lambda: now) as store:
+                current = store.get_attachment(RUNTIME)
+            self.assertEqual(current["runtimeProfile"]["conversationId"], NEW_CONVERSATION)
+
+    def test_explicit_stock_attach_without_local_mapping_remains_supported(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+
+                async def assigned_stock(self, _request):
+                    return response(runtimeGeneration=2, attachmentGeneration=2,
+                                    runtimeProfile={**PROFILE, "conversationId": NEW_CONVERSATION},
+                                    leaseUntil=_iso(now + 120))
+
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            self.assertEqual(code, 0, output.getvalue())
+
+    def test_active_messaging_mapping_is_not_reassigned_by_stock_attach(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            original = self._messaging_mapping(now + 30)
+            with Store(state, clock=lambda: now) as store:
+                store.put_messaging_attachment(original)
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                called = False
+
+                async def assigned_stock(self, _request):
+                    self.called = True
+                    return response(runtimeGeneration=2, attachmentGeneration=2)
+
+            cloud = FakeCloud()
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=cloud), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            self.assertEqual(code, 2)
+            self.assertFalse(cloud.called)
+            self.assertEqual(json.loads(output.getvalue())["reason"], "stale")
+
+    def test_cloud_confirmed_stock_reattach_uses_daemon_writer(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            with Store(state, clock=lambda: now) as store:
+                store.put_messaging_attachment(self._messaging_mapping(now + 30))
+                store.detach(RUNTIME)
+            daemon_store = Store(state, clock=lambda: now)
+            self.addCleanup(daemon_store.close)
+            (state / "control.sock").touch()
+            commands = []
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                node_id, node_generation = NODE, 2
+
+                async def assigned_stock(self, _request):
+                    return response(runtimeGeneration=3, attachmentGeneration=3,
+                                    runtimeProfile={**PROFILE, "conversationId": NEW_CONVERSATION},
+                                    leaseUntil=_iso(now + 120))
+
+            def daemon_request(_state, command):
+                commands.append(command)
+                return daemon._execute_control_command(daemon_store, command)
+
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), \
+                    patch.object(cli, "request", side_effect=daemon_request), \
+                    redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "2",
+                    "--expected-attachment-generation", "2",
+                ])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertEqual([item["command"] for item in commands], [
+                "get-attachment", "get-stock-reassignment-source", "put-stock-reassignment",
+            ])
+            self.assertNotIn("routingGeneration", daemon_store.get_attachment(RUNTIME))
+
+    def test_stock_reassignment_rejects_generic_downgrade_and_stale_identity(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            old = self._messaging_mapping(now + 30)
+            target = {**self._stock_mapping(now + 120), "runtimeGeneration": 2,
+                      "attachmentGeneration": 2, "consumerGeneration": 2,
+                      "runtimeProfile": {**PROFILE, "conversationId": NEW_CONVERSATION}}
+            with Store(state, clock=lambda: now) as store:
+                store.put_messaging_attachment(old)
+                store.detach(RUNTIME)
+                source = store.get_stock_reassignment_source(RUNTIME)
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_stock_reassignment(
+                        target, expected_mapping={**source, "leaseExpiresAt": now + 30},
+                        expected_runtime_generation=1, expected_attachment_generation=1,
+                    )
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_stock_reassignment(
+                        target, expected_mapping=source,
+                        expected_runtime_generation=None, expected_attachment_generation=1,
+                    )
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_stock_reassignment(
+                        {**target, "nativeThreadId": str(uuid.uuid4())}, expected_mapping=source,
+                        expected_runtime_generation=1, expected_attachment_generation=1,
+                    )
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_attachment(target)
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_stock_reassignment(
+                        {**target, "runtimeGeneration": 1}, expected_mapping=source,
+                        expected_runtime_generation=1, expected_attachment_generation=1,
+                    )
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_stock_reassignment(
+                        {**target, "principal": "other@example.com"}, expected_mapping=source,
+                        expected_runtime_generation=1, expected_attachment_generation=1,
+                    )
+                with self.assertRaisesRegex(StoreError, "stale"):
+                    store.put_stock_reassignment(
+                        target, expected_mapping={**source, "namespace": "different/inbox"},
+                        expected_runtime_generation=1, expected_attachment_generation=1,
+                    )
+                self.assertEqual(store.get_stock_reassignment_source(RUNTIME), source)
+                store.put_stock_reassignment(
+                    target, expected_mapping=source,
+                    expected_runtime_generation=1, expected_attachment_generation=1,
+                )
+                current = store.get_attachment(RUNTIME)
+                self.assertEqual(current["runtimeProfile"]["conversationId"], NEW_CONVERSATION)
+                self.assertNotIn("routingGeneration", current)
+
+    def test_same_generation_messaging_upgrade_cannot_change_conversation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            with Store(state, clock=lambda: NOW) as store:
+                store.put_attachment(self._stock_mapping(NOW + 30))
+                with self.assertRaisesRegex(StoreError, "invalid_attachment"):
+                    store.put_messaging_attachment({
+                        **self._messaging_mapping(NOW + 30),
+                        "runtimeProfile": {**PROFILE, "conversationId": NEW_CONVERSATION},
+                    })
+
     def test_invalid_cloud_config_returns_safe_refusal_without_mutation(self):
         for operation in ("attach", "renew"):
             for invalid in ("missing", "malformed", "permissions"):

@@ -381,6 +381,7 @@ def _execute_stock_control(args, state_dir):
             raise CloudError("invalid_messaging_handoff")
         cloud = load_cloud_client(args.cloud_config, state_dir)
         expected_mapping = None
+        reassignment_mapping = None
         if args.operation == "renew":
             try:
                 expected_mapping = _read_native_mapping(state_dir, args.runtime_id)
@@ -388,6 +389,33 @@ def _execute_stock_control(args, state_dir):
                 print(json.dumps({"assignment": None, "reason": error.code}))
                 return 2
             if not _stock_renew_mapping_matches(expected_mapping, args, cloud):
+                print(json.dumps({"assignment": None, "reason": "stale"}))
+                return 2
+        elif args.expected_runtime_generation is not None:
+            try:
+                reassignment_mapping = _read_native_mapping(state_dir, args.runtime_id)
+                if reassignment_mapping is None:
+                    reassignment_mapping = _read_stock_reassignment_source(state_dir, args.runtime_id)
+            except CloudError as error:
+                print(json.dumps({"assignment": None, "reason": error.code}))
+                return 2
+            if (reassignment_mapping is not None and (
+                    not isinstance(reassignment_mapping, dict)
+                    or reassignment_mapping.get("runtimeId") != args.runtime_id
+                    or reassignment_mapping.get("principal") != cloud.principal
+                    or reassignment_mapping.get("agent") != cloud.agent
+                    or not isinstance(reassignment_mapping.get("runtimeProfile"), dict)
+                    or reassignment_mapping["runtimeProfile"].get("profile") != "assigned_stock_client"
+                    or reassignment_mapping["runtimeProfile"].get("client") != "codex"
+                    or reassignment_mapping.get("runtimeGeneration", 0) > args.expected_runtime_generation
+                    or reassignment_mapping.get("attachmentGeneration", 0) > args.expected_attachment_generation
+                    or reassignment_mapping.get("consumerGeneration")
+                        != reassignment_mapping.get("attachmentGeneration")
+                    or ("routingGeneration" in reassignment_mapping
+                        and reassignment_mapping.get("leaseExpiresAt") != 0)
+                    or ("routingGeneration" in reassignment_mapping
+                        and any(key in reassignment_mapping for key in
+                                ("nativeBinding", "nativeThreadId", "sessionId"))))):
                 print(json.dumps({"assignment": None, "reason": "stale"}))
                 return 2
         handoff = (_load_stock_messaging_handoff(handoff_path, args, cloud, expected_mapping)
@@ -452,7 +480,21 @@ def _execute_stock_control(args, state_dir):
                 state_dir, expected_mapping, mapping["leaseExpiresAt"],
             )
     else:
-        stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
+        if args.expected_runtime_generation is not None and (
+                response["runtimeGeneration"] != args.expected_runtime_generation + 1
+                or response["attachmentGeneration"] != args.expected_attachment_generation + 1):
+            print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
+                              "runtimeId": response["runtimeId"], "reason": "invalid_response"}))
+            return 2
+        if (reassignment_mapping is not None
+                and any(key in reassignment_mapping for key in ("namespace", "routingGeneration",
+                                                                "agentIncarnation"))):
+            stored, error_code = _store_stock_reassignment(
+                state_dir, mapping, reassignment_mapping,
+                args.expected_runtime_generation, args.expected_attachment_generation,
+            )
+        else:
+            stored, error_code = _store_native_mapping(state_dir, args.operation, mapping, None)
     if not stored:
         print(json.dumps({"assignment": "cloud_committed_local_mapping_failed",
                           "runtimeId": response["runtimeId"],
@@ -947,6 +989,31 @@ def _read_native_mapping(state_dir, runtime_id):
     return result["mapping"]
 
 
+def _read_stock_reassignment_source(state_dir, runtime_id):
+    """Read the exact detached tombstone used to CAS a cloud-confirmed reassignment."""
+    def read_directly():
+        with Store(state_dir) as store:
+            return {"mapping": store.get_stock_reassignment_source(runtime_id)}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            result = read_directly()
+        else:
+            try:
+                result = asyncio.run(request(state_dir, {
+                    "command": "get-stock-reassignment-source", "runtimeId": runtime_id,
+                }))
+            except (ConnectionRefusedError, FileNotFoundError):
+                result = read_directly()
+    except (StoreError, OSError, ValueError, TimeoutError):
+        raise CloudError("local_mapping_unavailable") from None
+    if not isinstance(result, dict) or set(result) != {"mapping"} or (
+            result["mapping"] is not None and not isinstance(result["mapping"], dict)):
+        raise CloudError("invalid_store_response")
+    return result["mapping"]
+
+
 def _store_native_mapping(state_dir, operation, mapping, transfer):
     if operation == "transfer":
         command = {"command": "transfer-attachment", "mapping": mapping, "transfer": transfer}
@@ -988,6 +1055,40 @@ def _store_messaging_mapping(state_dir, mapping, expected_mapping):
     def store_mapping_directly():
         with Store(state_dir) as store:
             stored = store.put_messaging_attachment(mapping, expected_mapping=expected_mapping)
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+
+    socket_path = state_dir / "control.sock"
+    try:
+        if not (socket_path.exists() or socket_path.is_symlink()):
+            stored = store_mapping_directly()
+        else:
+            try:
+                stored = asyncio.run(request(state_dir, command))
+            except (ConnectionRefusedError, FileNotFoundError):
+                stored = store_mapping_directly()
+    except StoreError as error:
+        return False, error.code
+    except (OSError, ValueError, TimeoutError):
+        return False, "local_operation_unavailable"
+    if stored == {"stored": True, "runtimeId": mapping["runtimeId"]}:
+        return True, None
+    return False, _store_response_error(stored)
+
+
+def _store_stock_reassignment(state_dir, mapping, expected_mapping,
+                              expected_runtime_generation, expected_attachment_generation):
+    command = {"command": "put-stock-reassignment", "mapping": mapping,
+               "expectedMapping": expected_mapping,
+               "expectedRuntimeGeneration": expected_runtime_generation,
+               "expectedAttachmentGeneration": expected_attachment_generation}
+
+    def store_mapping_directly():
+        with Store(state_dir) as store:
+            stored = store.put_stock_reassignment(
+                mapping, expected_mapping=expected_mapping,
+                expected_runtime_generation=expected_runtime_generation,
+                expected_attachment_generation=expected_attachment_generation,
+            )
         return {"stored": True, "runtimeId": stored["runtimeId"]}
 
     socket_path = state_dir / "control.sock"
