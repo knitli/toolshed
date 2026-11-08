@@ -429,8 +429,7 @@ def _execute_stock_control(args, state_dir):
                             or reassignment_mapping["runtimeProfile"].get("profile") != "assigned_stock_client"
                             or reassignment_mapping["runtimeProfile"].get("client") != "codex"
                             or type(reassignment_mapping.get("consumerGeneration")) is not int
-                            or reassignment_mapping["consumerGeneration"]
-                                != reassignment_mapping["attachmentGeneration"]
+                            or reassignment_mapping["consumerGeneration"] != reassignment_mapping["attachmentGeneration"]
                         )
                     if messaging_candidate:
                         invalid_mapping = invalid_mapping or (
