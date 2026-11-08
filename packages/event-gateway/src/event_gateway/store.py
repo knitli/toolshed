@@ -274,6 +274,19 @@ class Store:
         value = json.loads(row[0]) if row else None
         return value if value and value["leaseExpiresAt"] != 0 else None
 
+    def get_stock_reassignment_source(self, runtime_id):
+        """Read an assigned-stock Messaging row for an explicit cloud reassignment CAS."""
+        row = self.db.execute(
+            "SELECT data FROM attachments WHERE runtime=?", (runtime_id,)
+        ).fetchone()
+        value = json.loads(row[0]) if row else None
+        profile = value.get("runtimeProfile") if value else None
+        return value if (value and value.get("leaseExpiresAt") == 0
+                         and "routingGeneration" in value
+                         and isinstance(profile, dict)
+                         and profile.get("profile") == "assigned_stock_client"
+                         and profile.get("client") == "codex") else None
+
     def list_attachments(self):
         return [
             value
@@ -553,6 +566,53 @@ class Store:
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
+    def put_stock_reassignment(self, mapping, *, expected_mapping, expected_runtime_generation,
+                                expected_attachment_generation):
+        """Replace a Messaging stock mapping after cloud-confirmed reassignment only."""
+        from .protocol import ProtocolError, validate_runtime_profile
+
+        try:
+            validate_runtime_profile(expected_mapping.get("runtimeProfile")
+                                     if isinstance(expected_mapping, dict) else None)
+            validate_runtime_profile(mapping.get("runtimeProfile")
+                                     if isinstance(mapping, dict) else None)
+        except ProtocolError:
+            raise StoreError("invalid_attachment") from None
+        # Exact built-in int checks reject bool-as-int in persisted JSON generations.
+        # pylint: disable=unidiomatic-typecheck
+        if (not isinstance(mapping, dict)
+                or not isinstance(expected_mapping, dict)
+                or not all(key in expected_mapping for key in MESSAGING_METADATA)
+                or expected_mapping.get("leaseExpiresAt") != 0
+                or any(key in expected_mapping for key in ("nativeBinding", "nativeThreadId", "sessionId"))
+                or any(key in mapping for key in MESSAGING_METADATA)
+                or any(key in mapping for key in ("nativeBinding", "nativeThreadId", "sessionId"))
+                or type(expected_mapping.get("leaseExpiresAt")) is not int
+                or any(type(expected_mapping.get(key)) is not int
+                       or not 1 <= expected_mapping[key] < 2**53 - 1
+                       for key in ("runtimeGeneration", "attachmentGeneration"))
+                or expected_mapping.get("runtimeId") != mapping.get("runtimeId")
+                or any(expected_mapping.get(key) != mapping.get(key) for key in ("principal", "agent"))
+                or any(type(value) is not int or not 1 <= value < 2**53 - 1
+                       for value in (expected_runtime_generation, expected_attachment_generation))
+                or mapping.get("runtimeGeneration") != expected_runtime_generation + 1
+                or mapping.get("attachmentGeneration") != expected_attachment_generation + 1
+                or mapping.get("consumerGeneration") != mapping.get("attachmentGeneration")
+                or expected_mapping.get("runtimeGeneration", expected_runtime_generation)
+                    > expected_runtime_generation
+                or expected_mapping.get("attachmentGeneration", expected_attachment_generation)
+                    > expected_attachment_generation
+                or expected_mapping.get("consumerGeneration")
+                    != expected_mapping.get("attachmentGeneration")):
+            raise StoreError("invalid_attachment")
+        try:
+            return self._put_attachment(
+                mapping, allow_stock_messaging_downgrade=True,
+                expected_existing=expected_mapping,
+            )
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
     def put_messaging_attachment(self, mapping, *, expected_mapping=None):
         """Persist trusted v2 metadata only; no activation, transfer, or counter reset."""
         from .messaging_admission_v2 import ATTACHMENT_FIELDS, _finite
@@ -642,14 +702,15 @@ class Store:
         return expected_mapping
 
     def _put_attachment(self, mapping, *, transfer=None, allow_stock_messaging_upgrade=False,
-                        expected_existing=None):
+                        allow_stock_messaging_downgrade=False, expected_existing=None):
         self._validate_attachment(mapping, transfer)
         if mapping["leaseExpiresAt"] <= self.clock():
             raise StoreError("invalid_attachment")
         messaging = "routingGeneration" in mapping
         generations = (*IDENTITY[3:], "consumerGeneration", *(("routingGeneration", "agentIncarnation") if messaging else ()))
         old_data, old = self._existing_attachment(
-            mapping, expected_existing, allow_stock_messaging_upgrade, messaging,
+            mapping, expected_existing, allow_stock_messaging_upgrade,
+            allow_stock_messaging_downgrade, messaging,
         )
         target_error = None
         try:
@@ -663,7 +724,8 @@ class Store:
             mapping, old, old_data, messaging, transfer, expected_existing, target_error,
         )
 
-    def _existing_attachment(self, mapping, expected_existing, allow_stock_messaging_upgrade, messaging):
+    def _existing_attachment(self, mapping, expected_existing, allow_stock_messaging_upgrade,
+                             allow_stock_messaging_downgrade, messaging):
         row = self.db.execute(
             "SELECT data FROM attachments WHERE runtime=?", (mapping["runtimeId"],)
         ).fetchone()
@@ -677,7 +739,20 @@ class Store:
                     old, mapping, allow_stock_messaging_upgrade, messaging,
                 )
             )
-            if not stock_messaging_upgrade:
+            stock_messaging_downgrade = (
+                allow_stock_messaging_downgrade and not messaging
+                and "routingGeneration" in old
+                and isinstance(old.get("runtimeProfile"), dict)
+                and old["runtimeProfile"].get("profile") == "assigned_stock_client"
+                and old["runtimeProfile"].get("client") == "codex"
+                and not any(key in old for key in ("nativeBinding", "nativeThreadId", "sessionId"))
+                and old.get("runtimeId") == mapping.get("runtimeId")
+                and all(old.get(key) == mapping.get(key) for key in ("principal", "agent"))
+                and mapping.get("runtimeGeneration", 0) > old.get("runtimeGeneration", 0)
+                and mapping.get("attachmentGeneration", 0) > old.get("attachmentGeneration", 0)
+                and mapping.get("consumerGeneration") == mapping.get("attachmentGeneration")
+            )
+            if not (stock_messaging_upgrade or stock_messaging_downgrade):
                 raise StoreError("invalid_attachment")
         return old_data, old
 
@@ -688,6 +763,7 @@ class Store:
                 and old.get("runtimeProfile") == mapping.get("runtimeProfile")
                 and isinstance(old.get("runtimeProfile"), dict)
                 and old["runtimeProfile"].get("profile") == "assigned_stock_client"
+                and old["runtimeProfile"].get("client") == "codex"
                 and all(old.get(key) == mapping.get(key) for key in (*IDENTITY, "consumerGeneration")))
 
     def _validate_attachment_target(self, mapping, old, transfer, generations):

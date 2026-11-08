@@ -67,6 +67,11 @@ def _execute_control_command(store, request_value, dispatch=None):
             and request_value["command"] == "get-attachment"
             and _uuid(request_value["runtimeId"])):
         return {"mapping": store.get_attachment(request_value["runtimeId"])}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "runtimeId"}
+            and request_value["command"] == "get-stock-reassignment-source"
+            and _uuid(request_value["runtimeId"])):
+        return {"mapping": store.get_stock_reassignment_source(request_value["runtimeId"])}
     if (
         isinstance(request_value, dict)
         and set(request_value) == {"command", "runtimeId"}
@@ -85,6 +90,16 @@ def _execute_control_command(store, request_value, dispatch=None):
             and request_value["command"] == "put-messaging-attachment"):
         stored = store.put_messaging_attachment(
             request_value["mapping"], expected_mapping=request_value["expectedMapping"],
+        )
+        return {"stored": True, "runtimeId": stored["runtimeId"]}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "mapping", "expectedMapping",
+                                       "expectedRuntimeGeneration", "expectedAttachmentGeneration"}
+            and request_value["command"] == "put-stock-reassignment"):
+        stored = store.put_stock_reassignment(
+            request_value["mapping"], expected_mapping=request_value["expectedMapping"],
+            expected_runtime_generation=request_value["expectedRuntimeGeneration"],
+            expected_attachment_generation=request_value["expectedAttachmentGeneration"],
         )
         return {"stored": True, "runtimeId": stored["runtimeId"]}
     if (isinstance(request_value, dict)

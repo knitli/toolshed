@@ -327,6 +327,47 @@ class StoreTests(unittest.TestCase):
         self.store.record_admission(ident, admission)
         return ident, envelope, admission
 
+    def test_stock_reassignment_preserves_fenced_delivery_and_attempt_history(self):
+        from event_gateway import messaging_protocol_v2
+        from event_gateway.cloud import _iso
+
+        ident, envelope, _admission = self.assigned_stock_v2_admitted()
+        self.assertTrue(self.store.begin_stock_submit(ident, envelope["attemptId"]))
+        queued = copy.deepcopy(envelope)
+        queued["eventId"], queued["attemptId"] = str(uuid.uuid4()), str(uuid.uuid4())
+        queued["issuedAt"], queued["expiresAt"] = _iso(self.now - 30), _iso(self.now + 30)
+        queued["deliveryId"] = messaging_protocol_v2.derive_delivery_id(queued)
+        queued_id = self.store.accept(queued)["deliveryId"]
+        old = self.store.get_attachment(envelope["runtimeId"])
+        self.store.detach(envelope["runtimeId"])
+        source = self.store.get_stock_reassignment_source(envelope["runtimeId"])
+        target = {key: old[key] for key in (
+            "runtimeId", "principal", "agent", "nodeId", "nodeGeneration",
+        )}
+        target.update(
+            runtimeGeneration=old["runtimeGeneration"] + 1,
+            attachmentGeneration=old["attachmentGeneration"] + 1,
+            consumerGeneration=old["attachmentGeneration"] + 1,
+            leaseExpiresAt=self.now + 120,
+            runtimeProfile={**old["runtimeProfile"], "conversationId": str(uuid.uuid4())},
+        )
+        before = (
+            self.store.db.execute("SELECT count(*) FROM deliveries").fetchone()[0],
+            self.store.db.execute("SELECT count(*) FROM attempts").fetchone()[0],
+        )
+        self.store.put_stock_reassignment(
+            target, expected_mapping=source,
+            expected_runtime_generation=old["runtimeGeneration"],
+            expected_attachment_generation=old["attachmentGeneration"],
+        )
+        self.assertEqual(self.store.get(ident)["status"], "ambiguous")
+        self.assertEqual(self.store.get(queued_id)["status"], "stale")
+        self.assertEqual(self.store.current_attempt(ident)["state"], "ambiguous")
+        self.assertEqual((
+            self.store.db.execute("SELECT count(*) FROM deliveries").fetchone()[0],
+            self.store.db.execute("SELECT count(*) FROM attempts").fetchone()[0],
+        ), before)
+
     def test_stock_submit_is_fenced_by_live_permit_inside_store_transition(self):
         ident, attempt = self.stock_admitted()
         self.assertTrue(self.store.begin_stock_submit(ident, attempt))
