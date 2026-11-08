@@ -248,6 +248,33 @@ class PilotEvidenceTests(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual((result["idleRequest"], result["heldRequest"], result["busyRequest"]), (1, 2, 3))
 
+    def test_ordered_canonical_evidence_binds_idle_and_busy_message_ids(self):
+        idle_message_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        busy_message_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        requests, events = _evidence_inputs()
+        requests[0]["latestUserReferenceInputs"] = [
+            {"reference": IDLE_REF, "canonicalMessageId": idle_message_id},
+        ]
+        requests[2]["latestUserReferenceInputs"] = [
+            {"reference": BUSY_REF, "canonicalMessageId": busy_message_id},
+        ]
+        progress = pilot_progress(requests, events, BUSY_REF,
+                                  canonical_message_id=busy_message_id)
+        self.assertEqual(progress["status"], "observed")
+        self.assertEqual(progress["phase"], "after_held_response")
+        self.assertEqual(progress["canonicalMessageId"], busy_message_id)
+        result = pilot_evidence(requests, events, IDLE_REF, BUSY_REF,
+                                idle_message_id=idle_message_id, busy_message_id=busy_message_id)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["idleCanonicalMessageId"], idle_message_id)
+        self.assertEqual(result["busyCanonicalMessageId"], busy_message_id)
+        self.assertEqual(pilot_evidence(requests, events, IDLE_REF, BUSY_REF)["reason"],
+                         "canonical_message_id_required")
+        self.assertEqual(pilot_evidence(requests, events, IDLE_REF, BUSY_REF,
+                                        idle_message_id=idle_message_id,
+                                        busy_message_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc")["reason"],
+                         "canonical_message_id_mismatch")
+
     def test_progress_proves_completed_idle_request_before_held_turn(self):
         requests, events = _evidence_inputs()
         observed_requests, observed_events = requests[:1], events[:2]
@@ -280,16 +307,24 @@ class PilotEvidenceTests(unittest.TestCase):
         fixture.started = time.monotonic()
         fixture.stopped = False
         fixture.progress = Mock(return_value={"status": "pending", "reason": "request_not_observed"})
+        fixture.evidence = Mock(return_value={"passed": True})
         commands = [
-            (f'{{"command":"progress","reference":"{IDLE_REF}"}}\n').encode(),
+            (f'{{"command":"progress","reference":"{IDLE_REF}",'
+             '"canonicalMessageId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}\n').encode(),
+            (f'{{"command":"evidence","idleReference":"{IDLE_REF}","busyReference":"{BUSY_REF}",'
+             '"idleCanonicalMessageId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",'
+             '"busyCanonicalMessageId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}\n').encode(),
             b'{"command":"stop"}\n',
         ]
         with patch.object(fixture, "_read_control_line", side_effect=commands), \
                 redirect_stdout(io.StringIO()) as output:
             fixture.serve()
-        fixture.progress.assert_called_once_with(IDLE_REF)
+        fixture.progress.assert_called_once_with(IDLE_REF, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        fixture.evidence.assert_called_once_with(
+            IDLE_REF, BUSY_REF, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
         self.assertEqual(output.getvalue().splitlines(), [
-            '{"status":"pending","reason":"request_not_observed"}', '{"stopped":true}',
+            '{"status":"pending","reason":"request_not_observed"}', '{"passed":true}', '{"stopped":true}',
         ])
 
     def test_progress_gates_busy_request_on_held_response_and_exposes_no_content(self):
@@ -370,9 +405,25 @@ class PilotEvidenceTests(unittest.TestCase):
         self.assertEqual(record["references"], [IDLE_REF])
         self.assertEqual(record["latestUserReferences"], [IDLE_REF])
         events = [{"event": "request", "number": 1}, {"event": "response_written", "number": 1}]
-        self.assertEqual(pilot_progress([record], events, IDLE_REF)["status"], "observed")
+        progress = pilot_progress([record], events, IDLE_REF, canonical_message_id=message_id)
+        self.assertEqual(progress["status"], "observed")
+        self.assertEqual(progress["canonicalMessageId"], message_id)
         self.assertEqual(pilot_progress([record], events, BUSY_REF),
                          {"status": "pending", "reason": "request_not_observed"})
+        self.assertEqual(pilot_progress([record], events, IDLE_REF),
+                         {"status": "invalid", "reason": "canonical_message_id_required"})
+        self.assertEqual(pilot_progress([record], events, IDLE_REF,
+                                        canonical_message_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                         {"status": "invalid", "reason": "canonical_message_id_mismatch"})
+        duplicate_payload = response_input(selector)
+        duplicate_payload["input"][0]["content"].append({
+            "type": "input_text",
+            "text": selector.replace(message_id, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+        })
+        duplicate = _request_record(1, duplicate_payload, held=False)
+        self.assertEqual(pilot_progress([duplicate], events, IDLE_REF,
+                                        canonical_message_id=message_id),
+                         {"status": "invalid", "reason": "canonical_selector_not_unique"})
 
         spoofed_session = {"input": [{"role": "user", "content": [
             {"type": "input_text", "text": selector},
@@ -381,7 +432,8 @@ class PilotEvidenceTests(unittest.TestCase):
         spoofed_record = _request_record(1, spoofed_session, held=False)
         self.assertEqual(spoofed_record["references"], [IDLE_REF])
         self.assertEqual(spoofed_record["sessionMarkers"], [])
-        self.assertEqual(pilot_progress([spoofed_record], events, IDLE_REF),
+        self.assertEqual(pilot_progress([spoofed_record], events, IDLE_REF,
+                                        canonical_message_id=message_id),
                          {"status": "invalid", "reason": "wrong_session_or_input"})
 
         invalid = [

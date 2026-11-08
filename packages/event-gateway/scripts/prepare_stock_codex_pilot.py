@@ -3,8 +3,9 @@
 This fixture creates no Cloud state and never queues references. Keep the
 reported CODEX_HOME only for fixture Gateway/TUI processes; the Gateway must
 retain the real HOME needed by its installed token helper. Send one JSONL
-control at a time: status, start_busy, release, progress (reference), evidence
-(idleReference and busyReference), or stop.
+control at a time: status, start_busy, release, progress (reference and optional
+canonicalMessageId), evidence (idleReference, busyReference, and optional
+idleCanonicalMessageId/busyCanonicalMessageId), or stop.
 """
 
 import argparse
@@ -39,9 +40,10 @@ HELD_REPLY = "synthetic held response e3 marker"
 SESSION_A = "Seed synthetic session A."
 SESSION_B = "Seed synthetic session B."
 REFERENCE = re.compile(r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+CANONICAL_MESSAGE_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 MESSAGE_SELECTOR = re.compile(
     rf"Messaging event reference: ({REFERENCE.pattern})\n"
-    r"Canonical message ID: [0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n"
+    rf"Canonical message ID: ({CANONICAL_MESSAGE_ID.pattern})\n"
     r"Use the existing Messaging MCP read tool to read this message by ID under your current permissions\."
 )
 MAX_LIFETIME_SECONDS = 900
@@ -80,15 +82,15 @@ def _assistant_has_marker(payload, marker):
     return False
 
 
-def _user_references(items):
-    references = set()
+def _user_reference_inputs(items):
+    references = []
     for text in _user_texts(items):
         if REFERENCE.fullmatch(text):
-            references.add(text)
+            references.append({"reference": text})
         else:
             selector = MESSAGE_SELECTOR.fullmatch(text)
             if selector:
-                references.add(selector.group(1))
+                references.append({"reference": selector.group(1), "canonicalMessageId": selector.group(2)})
     return references
 
 
@@ -96,10 +98,13 @@ def _request_record(number, payload, held):
     markers = _user_texts(payload.get("input", []))
     latest_user = next((item for item in reversed(payload.get("input", []))
                         if isinstance(item, dict) and item.get("role") == "user"), None)
+    reference_inputs = _user_reference_inputs(payload.get("input", []))
+    latest_reference_inputs = _user_reference_inputs([latest_user]) if latest_user else []
     return {
         "number": number,
-        "references": sorted(_user_references(payload.get("input", []))),
-        "latestUserReferences": sorted(_user_references([latest_user]) if latest_user else set()),
+        "references": sorted({item["reference"] for item in reference_inputs}),
+        "latestUserReferences": sorted({item["reference"] for item in latest_reference_inputs}),
+        "latestUserReferenceInputs": latest_reference_inputs,
         "sessionMarkers": [marker for marker in (SESSION_A, SESSION_B) if marker in markers],
         "heldPrompt": held,
         "containsHeldPrompt": HELD_PROMPT in markers,
@@ -213,7 +218,37 @@ class PilotProvider(http.server.ThreadingHTTPServer):
         return True
 
 
-def pilot_evidence(requests, events, idle_reference, busy_reference, baseline=0):
+def _canonical_message_claim(row, reference, expected_message_id):
+    if (expected_message_id is not None
+            and (not isinstance(expected_message_id, str)
+                 or not CANONICAL_MESSAGE_ID.fullmatch(expected_message_id))):
+        return False, "invalid_canonical_message_id", None
+    inputs = row.get("latestUserReferenceInputs")
+    if inputs is None:
+        return (expected_message_id is None,
+                None if expected_message_id is None else "canonical_selector_missing", None)
+    matching = [item for item in inputs
+                if isinstance(item, dict) and item.get("reference") == reference]
+    if not matching:
+        return False, "canonical_selector_missing", None
+    canonical = [item for item in matching if "canonicalMessageId" in item]
+    if not canonical:
+        return (expected_message_id is None,
+                None if expected_message_id is None else "canonical_selector_missing", None)
+    if len(matching) != 1 or len(canonical) != 1:
+        return False, "canonical_selector_not_unique", None
+    observed_message_id = canonical[0].get("canonicalMessageId")
+    if not isinstance(observed_message_id, str) or not CANONICAL_MESSAGE_ID.fullmatch(observed_message_id):
+        return False, "invalid_observed_canonical_message_id", None
+    if expected_message_id is None:
+        return False, "canonical_message_id_required", None
+    if observed_message_id != expected_message_id:
+        return False, "canonical_message_id_mismatch", None
+    return True, None, observed_message_id
+
+
+def pilot_evidence(requests, events, idle_reference, busy_reference, baseline=0,
+                   idle_message_id=None, busy_message_id=None):
     """Require two exact refs in A, with busy ref after A's held reply."""
     if (not isinstance(idle_reference, str) or not REFERENCE.fullmatch(idle_reference)
             or not isinstance(busy_reference, str) or not REFERENCE.fullmatch(busy_reference)
@@ -226,6 +261,12 @@ def pilot_evidence(requests, events, idle_reference, busy_reference, baseline=0)
     if len(idle) != 1 or len(busy) != 1 or len(holds) != 1:
         return {"passed": False, "reason": "reference_or_hold_cardinality"}
     idle, busy, held = idle[0], busy[0], holds[0]
+    idle_ok, idle_error, observed_idle_message_id = _canonical_message_claim(
+        idle, idle_reference, idle_message_id)
+    busy_ok, busy_error, observed_busy_message_id = _canonical_message_claim(
+        busy, busy_reference, busy_message_id)
+    if not idle_ok or not busy_ok:
+        return {"passed": False, "reason": idle_error or busy_error}
     if (idle.get("number", 0) >= held.get("number", 0)
             or busy.get("number", 0) <= held.get("number", 0)
             or idle.get("latestUserReferences") != [idle_reference]
@@ -248,12 +289,17 @@ def pilot_evidence(requests, events, idle_reference, busy_reference, baseline=0)
         return {"passed": False, "reason": "held_response_missing"}
     if not idle_request < idle_response < held_request < release < held_response < busy_request:
         return {"passed": False, "reason": "held_response_missing"}
-    return {"passed": True, "reason": None, "idleReference": idle_reference,
-            "busyReference": busy_reference, "idleRequest": idle["number"],
-            "heldRequest": held["number"], "busyRequest": busy["number"]}
+    result = {"passed": True, "reason": None, "idleReference": idle_reference,
+              "busyReference": busy_reference, "idleRequest": idle["number"],
+              "heldRequest": held["number"], "busyRequest": busy["number"]}
+    if observed_idle_message_id is not None:
+        result["idleCanonicalMessageId"] = observed_idle_message_id
+    if observed_busy_message_id is not None:
+        result["busyCanonicalMessageId"] = observed_busy_message_id
+    return result
 
 
-def pilot_progress(requests, events, reference, baseline=0):
+def pilot_progress(requests, events, reference, baseline=0, canonical_message_id=None):
     """Return bounded proof that one exact ref reached the synthetic provider in A."""
     if not isinstance(reference, str) or not REFERENCE.fullmatch(reference):
         return {"status": "invalid", "reason": "invalid_reference"}
@@ -264,6 +310,10 @@ def pilot_progress(requests, events, reference, baseline=0):
     if len(matches) != 1:
         return {"status": "invalid", "reason": "reference_not_unique"}
     row = matches[0]
+    canonical_ok, canonical_error, observed_message_id = _canonical_message_claim(
+        row, reference, canonical_message_id)
+    if not canonical_ok:
+        return {"status": "invalid", "reason": canonical_error}
     if (row.get("latestUserReferences") != [reference]
             or row.get("sessionMarkers") != [SESSION_A]
             or any(SESSION_B in item.get("sessionMarkers", []) for item in observed)):
@@ -282,6 +332,13 @@ def pilot_progress(requests, events, reference, baseline=0):
         return {"status": "invalid", "reason": "event_order_invalid"}
 
     held_rows = [item for item in observed if item.get("heldPrompt") is True]
+    def observed_result(phase, response_written):
+        result = {"status": "observed", "request": number, "session": "A",
+                  "responseWritten": response_written, "phase": phase}
+        if observed_message_id is not None:
+            result["canonicalMessageId"] = observed_message_id
+        return result
+
     if held_rows:
         if len(held_rows) != 1:
             return {"status": "invalid", "reason": "held_request_not_unique"}
@@ -297,8 +354,7 @@ def pilot_progress(requests, events, reference, baseline=0):
                 return {"status": "pending", "reason": "response_not_written"}
             if not request_index < response_index < held_request_index:
                 return {"status": "invalid", "reason": "idle_response_not_before_held_request"}
-            return {"status": "observed", "request": number, "session": "A",
-                    "responseWritten": True, "phase": "before_held_request"}
+            return observed_result("before_held_request", True)
         try:
             release_index = names.index(("hold_release", held_number))
             held_response_index = names.index(("response_written", held_number))
@@ -309,12 +365,10 @@ def pilot_progress(requests, events, reference, baseline=0):
         if (number == held_number or row.get("heldAssistantMarker") != HELD_REPLY
                 or request_index <= held_response_index):
             return {"status": "invalid", "reason": "not_after_held_response"}
-        return {"status": "observed", "request": number, "session": "A",
-                "responseWritten": response_index is not None, "phase": "after_held_response"}
+        return observed_result("after_held_response", response_index is not None)
     if response_index is None:
         return {"status": "pending", "reason": "response_not_written"}
-    return {"status": "observed", "request": number, "session": "A",
-            "responseWritten": True, "phase": "idle"}
+    return observed_result("idle", True)
 
 
 def _owned_daemon_socket(fixture_root, reported_path):
@@ -461,15 +515,16 @@ class PilotFixture:
             raise RuntimeError("held_response_timeout")
         return {"released": True, "heldResponseWritten": True, "marker": HELD_REPLY}
 
-    def evidence(self, idle_reference, busy_reference):
+    def evidence(self, idle_reference, busy_reference, idle_message_id=None, busy_message_id=None):
         with self.provider.lock:
             requests, events = list(self.provider.requests), list(self.provider.events)
-        return pilot_evidence(requests, events, idle_reference, busy_reference, self.observation_baseline)
+        return pilot_evidence(requests, events, idle_reference, busy_reference, self.observation_baseline,
+                              idle_message_id, busy_message_id)
 
-    def progress(self, reference):
+    def progress(self, reference, canonical_message_id=None):
         with self.provider.lock:
             requests, events = list(self.provider.requests), list(self.provider.events)
-        return pilot_progress(requests, events, reference, self.observation_baseline)
+        return pilot_progress(requests, events, reference, self.observation_baseline, canonical_message_id)
 
     def _read_control_line(self, deadline):
         descriptor = sys.stdin.fileno()
@@ -507,9 +562,17 @@ class PilotFixture:
             elif name == "release":
                 result = self.release()
             elif name == "progress":
-                result = self.progress(command.get("reference"))
+                if "canonicalMessageId" in command:
+                    result = self.progress(command.get("reference"), command.get("canonicalMessageId"))
+                else:
+                    result = self.progress(command.get("reference"))
             elif name == "evidence":
-                result = self.evidence(command.get("idleReference"), command.get("busyReference"))
+                if "idleCanonicalMessageId" in command or "busyCanonicalMessageId" in command:
+                    result = self.evidence(command.get("idleReference"), command.get("busyReference"),
+                                           command.get("idleCanonicalMessageId"),
+                                           command.get("busyCanonicalMessageId"))
+                else:
+                    result = self.evidence(command.get("idleReference"), command.get("busyReference"))
                 if not result["passed"]:
                     raise RuntimeError(result["reason"])
             else:
