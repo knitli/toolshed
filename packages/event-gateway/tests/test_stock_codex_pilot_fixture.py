@@ -1,6 +1,7 @@
 """Pure evidence-gate tests for the local stock Codex pilot fixture."""
 
 from pathlib import Path
+import asyncio
 import errno
 from contextlib import redirect_stdout
 from contextlib import redirect_stderr
@@ -17,6 +18,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from prepare_stock_codex_pilot import (  # noqa: E402
@@ -36,6 +38,7 @@ from prepare_stock_codex_pilot import (  # noqa: E402
     pilot_progress,
 )
 from probe_stock_codex_queue import _cli  # noqa: E402
+from event_gateway.stock_codex import StockCodexAdapter  # noqa: E402
 
 IDLE_REF = "ref_11111111-1111-4111-8111-111111111111"
 BUSY_REF = "ref_22222222-2222-4222-8222-222222222222"
@@ -326,15 +329,112 @@ class PilotEvidenceTests(unittest.TestCase):
 
     def test_historic_refs_and_held_prompt_do_not_reclassify_followup(self):
         payload = {"input": [
-            {"role": "user", "content": [{"text": SESSION_A}, {"text": IDLE_REF}, {"text": HELD_PROMPT}]},
-            {"role": "assistant", "content": [{"text": HELD_REPLY}]},
-            {"role": "user", "content": [{"text": BUSY_REF}]},
+            {"role": "user", "content": [{"type": "input_text", "text": SESSION_A},
+                                            {"type": "input_text", "text": IDLE_REF},
+                                            {"type": "input_text", "text": HELD_PROMPT}]},
+            {"role": "assistant", "content": [{"type": "output_text", "text": HELD_REPLY}]},
+            {"role": "user", "content": [{"type": "input_text", "text": BUSY_REF}]},
         ]}
         record = _request_record(3, payload, held=False)
         self.assertEqual(record["references"], [IDLE_REF, BUSY_REF])
         self.assertEqual(record["latestUserReferences"], [BUSY_REF])
         self.assertFalse(record["heldPrompt"])
         self.assertTrue(record["containsHeldPrompt"])
+
+    def test_request_record_recognizes_only_exact_canonical_selector(self):
+        message_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        captured = {}
+
+        async def fake_create_subprocess_exec(*args, **kwargs):
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            process = Mock()
+            process.wait = Mock(return_value=asyncio.sleep(0, result=0))
+            return process
+
+        adapter = StockCodexAdapter(message_id, "/unused/codex")
+        with patch("event_gateway.stock_codex._binary_is_executable", return_value=True), \
+                patch("event_gateway.stock_codex.asyncio.create_subprocess_exec",
+                      side_effect=fake_create_subprocess_exec):
+            asyncio.run(adapter.submit(IDLE_REF, canonical_message_id=message_id))
+        args = captured["args"]
+        selector = args[args.index("--message") + 1]
+
+        def response_input(text):
+            return {"input": [{"role": "user", "content": [
+                {"type": "input_text", "text": SESSION_A},
+                {"type": "input_text", "text": text},
+            ]}]}
+
+        record = _request_record(1, response_input(selector), held=False)
+        self.assertEqual(record["references"], [IDLE_REF])
+        self.assertEqual(record["latestUserReferences"], [IDLE_REF])
+        events = [{"event": "request", "number": 1}, {"event": "response_written", "number": 1}]
+        self.assertEqual(pilot_progress([record], events, IDLE_REF)["status"], "observed")
+        self.assertEqual(pilot_progress([record], events, BUSY_REF),
+                         {"status": "pending", "reason": "request_not_observed"})
+
+        spoofed_session = {"input": [{"role": "user", "content": [
+            {"type": "input_text", "text": selector},
+            {"type": "input_image", "text": SESSION_A},
+        ]}]}
+        spoofed_record = _request_record(1, spoofed_session, held=False)
+        self.assertEqual(spoofed_record["references"], [IDLE_REF])
+        self.assertEqual(spoofed_record["sessionMarkers"], [])
+        self.assertEqual(pilot_progress([spoofed_record], events, IDLE_REF),
+                         {"status": "invalid", "reason": "wrong_session_or_input"})
+
+        invalid = [
+            selector.replace(message_id, "aaaaaaaa-aaaa-3aaa-8aaa-aaaaaaaaaaaa"),
+            selector + " extra",
+            f"quoted history: {selector}",
+            f"Messaging event reference: {IDLE_REF}\nCanonical message ID: {message_id}\nread this message",
+        ]
+        for text in invalid:
+            with self.subTest(text=text):
+                bad_record = _request_record(1, response_input(text), held=False)
+                self.assertEqual(bad_record["references"], [])
+                self.assertEqual(bad_record["latestUserReferences"], [])
+
+        for part_type in ("input_image", None):
+            malformed_part = {"text": selector}
+            if part_type is not None:
+                malformed_part["type"] = part_type
+            bad_record = _request_record(1, {"input": [{"role": "user", "content": [malformed_part]}]},
+                                         held=False)
+            self.assertEqual(bad_record["latestUserReferences"], [])
+
+        history_only = {"input": [
+            {"role": "user", "content": [{"type": "input_text", "text": selector}]},
+            {"role": "user", "content": [{"type": "input_text", "text": "followup without a reference"}]},
+        ]}
+        history_record = _request_record(1, history_only, held=False)
+        self.assertEqual(history_record["references"], [IDLE_REF])
+        self.assertEqual(history_record["latestUserReferences"], [])
+
+        bare_record = _request_record(1, response_input(IDLE_REF), held=False)
+        self.assertEqual(bare_record["latestUserReferences"], [IDLE_REF])
+        string_record = _request_record(1, {"input": [{"role": "user", "content": IDLE_REF}]}, held=False)
+        self.assertEqual(string_record["latestUserReferences"], [IDLE_REF])
+
+    def test_request_record_ignores_text_on_non_input_text_parts(self):
+        for part in ({"type": "input_image", "text": IDLE_REF}, {"text": IDLE_REF}):
+            with self.subTest(part=part):
+                record = _request_record(1, {"input": [{"role": "user", "content": [part]}]}, held=False)
+                self.assertEqual(record["references"], [])
+                self.assertEqual(record["latestUserReferences"], [])
+
+    def test_held_assistant_marker_requires_output_text(self):
+        for part in ({"type": "input_image", "text": HELD_REPLY}, {"text": HELD_REPLY}):
+            with self.subTest(part=part):
+                record = _request_record(1, {"input": [
+                    {"role": "assistant", "content": [part]},
+                ]}, held=False)
+                self.assertIsNone(record["heldAssistantMarker"])
+        record = _request_record(1, {"input": [
+            {"role": "assistant", "content": [{"type": "output_text", "text": HELD_REPLY}]},
+        ]}, held=False)
+        self.assertEqual(record["heldAssistantMarker"], HELD_REPLY)
 
     def test_unrelated_reference_does_not_satisfy_busy_target(self):
         requests, events = _evidence_inputs()

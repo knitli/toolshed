@@ -26,11 +26,10 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from probe_stock_codex_busy import (  # noqa: E402
-    PtyDrain, _assistant_has_marker, _clean_terminal, _read_until, _reap_tui, _remote_tui,
+    PtyDrain, _clean_terminal, _read_until, _reap_tui, _remote_tui,
 )
 from probe_stock_codex_queue import (  # noqa: E402
     _environment,
-    _message_texts,
     _response_events,
     _seed,
 )
@@ -40,6 +39,11 @@ HELD_REPLY = "synthetic held response e3 marker"
 SESSION_A = "Seed synthetic session A."
 SESSION_B = "Seed synthetic session B."
 REFERENCE = re.compile(r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
+MESSAGE_SELECTOR = re.compile(
+    rf"Messaging event reference: ({REFERENCE.pattern})\n"
+    r"Canonical message ID: [0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n"
+    r"Use the existing Messaging MCP read tool to read this message by ID under your current permissions\."
+)
 MAX_LIFETIME_SECONDS = 900
 MAX_CONTROL_BYTES = 4096
 MAX_OUTPUT_BYTES = 8192
@@ -47,20 +51,55 @@ MAX_PROVIDER_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_PROVIDER_REQUESTS = 128
 
 
-def _latest_user_markers(payload):
-    items = payload.get("input", [])
-    latest = next((item for item in reversed(items)
-                   if isinstance(item, dict) and item.get("role") == "user"), None)
-    return _message_texts({"input": [latest]}) if latest is not None else []
+def _user_texts(items):
+    texts = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("role") != "user":
+            continue
+        content = item.get("content", [])
+        if isinstance(content, list):
+            texts.extend(part["text"] for part in content
+                         if isinstance(part, dict) and part.get("type") == "input_text"
+                         and isinstance(part.get("text"), str))
+        elif isinstance(content, str):
+            texts.append(content)
+    return texts
+
+
+def _assistant_has_marker(payload, marker):
+    for item in payload.get("input", []):
+        if not isinstance(item, dict) or item.get("role") != "assistant":
+            continue
+        content = item.get("content", [])
+        if content == marker:
+            return True
+        if isinstance(content, list) and any(
+                isinstance(part, dict) and part.get("type") == "output_text"
+                and part.get("text") == marker for part in content):
+            return True
+    return False
+
+
+def _user_references(items):
+    references = set()
+    for text in _user_texts(items):
+        if REFERENCE.fullmatch(text):
+            references.add(text)
+        else:
+            selector = MESSAGE_SELECTOR.fullmatch(text)
+            if selector:
+                references.add(selector.group(1))
+    return references
 
 
 def _request_record(number, payload, held):
-    markers = _message_texts(payload)
+    markers = _user_texts(payload.get("input", []))
+    latest_user = next((item for item in reversed(payload.get("input", []))
+                        if isinstance(item, dict) and item.get("role") == "user"), None)
     return {
         "number": number,
-        "references": sorted({item for item in markers if REFERENCE.fullmatch(item)}),
-        "latestUserReferences": sorted({item for item in _latest_user_markers(payload)
-                                         if REFERENCE.fullmatch(item)}),
+        "references": sorted(_user_references(payload.get("input", []))),
+        "latestUserReferences": sorted(_user_references([latest_user]) if latest_user else set()),
         "sessionMarkers": [marker for marker in (SESSION_A, SESSION_B) if marker in markers],
         "heldPrompt": held,
         "containsHeldPrompt": HELD_PROMPT in markers,
@@ -133,7 +172,7 @@ class PilotProvider(http.server.ThreadingHTTPServer):
                 except (OSError, TimeoutError):
                     self.send_error(408)
                     return
-                markers = _message_texts(payload)
+                markers = _user_texts(payload.get("input", []))
                 with provider.lock:
                     if len(provider.requests) >= MAX_PROVIDER_REQUESTS:
                         self.send_error(429)
