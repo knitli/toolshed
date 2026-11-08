@@ -405,28 +405,47 @@ def _execute_stock_control(args, state_dir):
                 return 2
             # Exact built-in int checks reject bool-as-int in persisted JSON generations.
             # pylint: disable=unidiomatic-typecheck
-            if (reassignment_mapping is not None and (
-                    not isinstance(reassignment_mapping, dict)
-                    or reassignment_mapping.get("runtimeId") != args.runtime_id
-                    or reassignment_mapping.get("principal") != cloud.principal
-                    or reassignment_mapping.get("agent") != cloud.agent
-                    or not isinstance(reassignment_mapping.get("runtimeProfile"), dict)
-                    or reassignment_mapping["runtimeProfile"].get("profile") != "assigned_stock_client"
-                    or reassignment_mapping["runtimeProfile"].get("client") != "codex"
-                    or any(type(reassignment_mapping.get(key)) is not int
-                           or not 1 <= reassignment_mapping[key] < 2**53
-                           for key in ("runtimeGeneration", "attachmentGeneration", "consumerGeneration"))
-                    or reassignment_mapping.get("runtimeGeneration", 0) > args.expected_runtime_generation
-                    or reassignment_mapping.get("attachmentGeneration", 0) > args.expected_attachment_generation
-                    or (reassignment_mapping.get("consumerGeneration")
-                        != reassignment_mapping.get("attachmentGeneration"))
-                    or ("routingGeneration" in reassignment_mapping
-                        and reassignment_mapping.get("leaseExpiresAt") != 0)
-                    or ("routingGeneration" in reassignment_mapping
-                        and any(key in reassignment_mapping for key in
-                                ("nativeBinding", "nativeThreadId", "sessionId"))))):
-                print(json.dumps({"assignment": None, "reason": "stale"}))
-                return 2
+            if reassignment_mapping is not None:
+                if not isinstance(reassignment_mapping, dict):
+                    invalid_mapping = True
+                else:
+                    messaging_candidate = any(key in reassignment_mapping for key in (
+                        "routingGeneration", "namespace", "agentIncarnation",
+                    ))
+                    stock_candidate = messaging_candidate or "runtimeProfile" in reassignment_mapping
+                    invalid_mapping = (
+                        reassignment_mapping.get("runtimeId") != args.runtime_id
+                        or reassignment_mapping.get("principal") != cloud.principal
+                        or reassignment_mapping.get("agent") != cloud.agent
+                        or any(type(reassignment_mapping.get(key)) is not int
+                               or not 1 <= reassignment_mapping[key] < 2**53 - 1
+                               for key in ("runtimeGeneration", "attachmentGeneration"))
+                        or reassignment_mapping["runtimeGeneration"] > args.expected_runtime_generation
+                        or reassignment_mapping["attachmentGeneration"] > args.expected_attachment_generation
+                    )
+                    if stock_candidate:
+                        invalid_mapping = invalid_mapping or (
+                            not isinstance(reassignment_mapping.get("runtimeProfile"), dict)
+                            or reassignment_mapping["runtimeProfile"].get("profile")
+                                != "assigned_stock_client"
+                            or reassignment_mapping["runtimeProfile"].get("client") != "codex"
+                            or type(reassignment_mapping.get("consumerGeneration")) is not int
+                            or reassignment_mapping["consumerGeneration"]
+                                != reassignment_mapping["attachmentGeneration"]
+                        )
+                    if messaging_candidate:
+                        invalid_mapping = invalid_mapping or (
+                            not all(key in reassignment_mapping for key in (
+                                "routingGeneration", "namespace", "agentIncarnation",
+                            ))
+                            or type(reassignment_mapping.get("leaseExpiresAt")) is not int
+                            or reassignment_mapping["leaseExpiresAt"] != 0
+                            or any(key in reassignment_mapping for key in
+                                   ("nativeBinding", "nativeThreadId", "sessionId"))
+                        )
+                if invalid_mapping:
+                    print(json.dumps({"assignment": None, "reason": "stale"}))
+                    return 2
         handoff = (_load_stock_messaging_handoff(handoff_path, args, cloud, expected_mapping)
                    if handoff_path is not None else None)
         response = asyncio.run(cloud.assigned_stock(request_value))

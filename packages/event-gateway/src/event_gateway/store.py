@@ -571,9 +571,11 @@ class Store:
         """Replace a Messaging stock mapping after cloud-confirmed reassignment only."""
         from .protocol import ProtocolError, validate_runtime_profile
 
-        old_profile = expected_mapping.get("runtimeProfile") if isinstance(expected_mapping, dict) else None
         try:
-            old_profile = validate_runtime_profile(old_profile)
+            validate_runtime_profile(expected_mapping.get("runtimeProfile")
+                                     if isinstance(expected_mapping, dict) else None)
+            validate_runtime_profile(mapping.get("runtimeProfile")
+                                     if isinstance(mapping, dict) else None)
         except ProtocolError:
             raise StoreError("invalid_attachment") from None
         # Exact built-in int checks reject bool-as-int in persisted JSON generations.
@@ -591,11 +593,6 @@ class Store:
                        for key in ("runtimeGeneration", "attachmentGeneration"))
                 or expected_mapping.get("runtimeId") != mapping.get("runtimeId")
                 or any(expected_mapping.get(key) != mapping.get(key) for key in ("principal", "agent"))
-                or old_profile.get("profile") != "assigned_stock_client"
-                or old_profile.get("client") != "codex"
-                or not isinstance(mapping.get("runtimeProfile"), dict)
-                or mapping["runtimeProfile"].get("profile") != "assigned_stock_client"
-                or mapping["runtimeProfile"].get("client") != "codex"
                 or any(type(value) is not int or not 1 <= value < 2**53 - 1
                        for value in (expected_runtime_generation, expected_attachment_generation))
                 or mapping.get("runtimeGeneration") != expected_runtime_generation + 1

@@ -109,6 +109,52 @@ class StockControlTests(unittest.IsolatedAsyncioTestCase):
                 current = store.get_attachment(RUNTIME)
             self.assertEqual(current["runtimeProfile"]["conversationId"], NEW_CONVERSATION)
 
+    def test_native_attachment_can_transition_to_stock_with_generation_advance(self):
+        now = NOW
+        native_thread = str(uuid.uuid4())
+        native = {
+            "runtimeId": RUNTIME, "principal": "owner@example.com", "agent": "codex",
+            "nodeGeneration": 2, "runtimeGeneration": 1, "attachmentGeneration": 1,
+            "leaseExpiresAt": now + 30, "sessionId": str(uuid.uuid4()),
+            "nativeThreadId": native_thread,
+            "nativeBinding": {"clientId": str(uuid.uuid4()), "connectionId": str(uuid.uuid4()),
+                              "backendPid": 123, "threadId": native_thread, "generation": 2,
+                              "serverInstanceId": str(uuid.uuid4()), "serverGeneration": 3},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            with Store(state, clock=lambda: now) as store:
+                store.put_attachment(native)
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                called = False
+
+                async def assigned_stock(self, _request):
+                    self.called = True
+                    return response(runtimeGeneration=2, attachmentGeneration=2,
+                                    runtimeProfile={**PROFILE, "conversationId": NEW_CONVERSATION},
+                                    leaseUntil=_iso(now + 120))
+
+            output = io.StringIO()
+            cloud = FakeCloud()
+            with patch.object(cli, "load_cloud_client", return_value=cloud), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertTrue(cloud.called)
+            with Store(state, clock=lambda: now) as store:
+                mapping = store.get_attachment(RUNTIME)
+            self.assertEqual(mapping["runtimeProfile"]["conversationId"], NEW_CONVERSATION)
+            self.assertNotIn("nativeBinding", mapping)
+
     def test_explicit_stock_attach_without_local_mapping_remains_supported(self):
         now = NOW
         with tempfile.TemporaryDirectory() as temp:
