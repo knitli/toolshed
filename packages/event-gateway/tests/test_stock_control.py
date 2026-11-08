@@ -167,6 +167,111 @@ class StockControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(cloud.called)
             self.assertEqual(json.loads(output.getvalue())["reason"], "stale")
 
+    def test_malformed_local_generation_refuses_before_cloud(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            with Store(state, clock=lambda: now):
+                pass
+            (state / "control.sock").touch()
+            malformed = {**self._stock_mapping(now + 30), "runtimeGeneration": None}
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+                called = False
+
+                async def assigned_stock(self, _request):
+                    self.called = True
+                    return response(runtimeGeneration=2, attachmentGeneration=2)
+
+            cloud = FakeCloud()
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=cloud), \
+                    patch.object(cli, "request", return_value={"mapping": malformed}), \
+                    redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            self.assertEqual(code, 2)
+            self.assertFalse(cloud.called)
+            self.assertEqual(json.loads(output.getvalue())["reason"], "stale")
+
+    def test_one_sided_expected_generation_is_invalid_before_local_or_cloud_access(self):
+        now = NOW
+        for option in ("--expected-runtime-generation", "--expected-attachment-generation"):
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as temp:
+                state = Path(temp).resolve() / "state"
+                with Store(state, clock=lambda: now) as store:
+                    stored = self._stock_mapping(now + 30)
+                    store.put_attachment(stored)
+                (state / "control.sock").touch()
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    called = False
+
+                    async def assigned_stock(self, _request):
+                        self.called = True
+                        return response(runtimeGeneration=2, attachmentGeneration=2,
+                                        leaseUntil=_iso(now + 120))
+
+                cloud = FakeCloud()
+                output = io.StringIO()
+                with patch.object(cli, "load_cloud_client", return_value=cloud) as load_cloud, \
+                        patch.object(cli, "Store") as local_store, \
+                        patch.object(cli, "request", return_value={"mapping": stored}) as control_request, \
+                        redirect_stdout(output):
+                    code = cli.main([
+                        "--state-dir", str(state), "stock-control", "attach",
+                        "--runtime-id", RUNTIME, "--conversation-id", CONVERSATION,
+                        "--cloud-config", str(state / "cloud.json"), option, "1",
+                    ])
+                self.assertEqual(code, 2)
+                self.assertEqual(json.loads(output.getvalue()),
+                                 {"assignment": None, "reason": "invalid_request"})
+                load_cloud.assert_not_called()
+                local_store.assert_not_called()
+                control_request.assert_not_called()
+                self.assertFalse(cloud.called)
+
+    def test_cloud_attach_must_advance_both_generations_and_preserves_local_row(self):
+        now = NOW
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve() / "state"
+            original = self._stock_mapping(now + 30)
+            with Store(state, clock=lambda: now) as store:
+                store.put_attachment(original)
+
+            class FakeCloud:
+                principal, agent = "owner@example.com", "codex"
+
+                async def assigned_stock(self, _request):
+                    return response(runtimeGeneration=2, attachmentGeneration=1,
+                                    runtimeProfile={**PROFILE, "conversationId": NEW_CONVERSATION},
+                                    leaseUntil=_iso(now + 120))
+
+            output = io.StringIO()
+            with patch.object(cli, "load_cloud_client", return_value=FakeCloud()), \
+                    patch.object(cli, "Store", side_effect=lambda path: Store(
+                        path, clock=lambda: now)), redirect_stdout(output):
+                code = cli.main([
+                    "--state-dir", str(state), "stock-control", "attach",
+                    "--runtime-id", RUNTIME, "--conversation-id", NEW_CONVERSATION,
+                    "--cloud-config", str(state / "cloud.json"),
+                    "--expected-runtime-generation", "1",
+                    "--expected-attachment-generation", "1",
+                ])
+            result = json.loads(output.getvalue())
+            self.assertEqual(code, 2)
+            self.assertEqual(result["assignment"], "cloud_committed_local_mapping_failed")
+            self.assertEqual(result["reason"], "invalid_response")
+            with Store(state, clock=lambda: now) as store:
+                self.assertEqual(store.get_attachment(RUNTIME), original)
+
     def test_cloud_confirmed_stock_reattach_uses_daemon_writer(self):
         now = NOW
         with tempfile.TemporaryDirectory() as temp:

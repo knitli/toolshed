@@ -20,7 +20,10 @@ from .client_runtime import (
     load_reconciliation, save_reconciliation, has_reconciliation, complete_reconciliation,
     _private_json,
 )
-from .cloud import CloudError, _iso, _uuid, _native_challenge_request, _same_json_value
+from .cloud import (
+    CloudError, _iso, _uuid, _native_challenge_request, _same_json_value,
+    _stock_assignment_request,
+)
 from .security import (
     ensure_private_directory,
     load_or_create_signing_key,
@@ -376,6 +379,7 @@ def _execute_stock_control(args, state_dir):
         "expectedAttachmentGeneration": args.expected_attachment_generation,
     }
     try:
+        request_value = _stock_assignment_request(request_value)
         handoff_path = getattr(args, "messaging_handoff", None)
         if handoff_path is not None and args.operation != "renew":
             raise CloudError("invalid_messaging_handoff")
@@ -399,6 +403,8 @@ def _execute_stock_control(args, state_dir):
             except CloudError as error:
                 print(json.dumps({"assignment": None, "reason": error.code}))
                 return 2
+            # Exact built-in int checks reject bool-as-int in persisted JSON generations.
+            # pylint: disable=unidiomatic-typecheck
             if (reassignment_mapping is not None and (
                     not isinstance(reassignment_mapping, dict)
                     or reassignment_mapping.get("runtimeId") != args.runtime_id
@@ -407,10 +413,13 @@ def _execute_stock_control(args, state_dir):
                     or not isinstance(reassignment_mapping.get("runtimeProfile"), dict)
                     or reassignment_mapping["runtimeProfile"].get("profile") != "assigned_stock_client"
                     or reassignment_mapping["runtimeProfile"].get("client") != "codex"
+                    or any(type(reassignment_mapping.get(key)) is not int
+                           or not 1 <= reassignment_mapping[key] < 2**53
+                           for key in ("runtimeGeneration", "attachmentGeneration", "consumerGeneration"))
                     or reassignment_mapping.get("runtimeGeneration", 0) > args.expected_runtime_generation
                     or reassignment_mapping.get("attachmentGeneration", 0) > args.expected_attachment_generation
-                    or reassignment_mapping.get("consumerGeneration")
-                        != reassignment_mapping.get("attachmentGeneration")
+                    or (reassignment_mapping.get("consumerGeneration")
+                        != reassignment_mapping.get("attachmentGeneration"))
                     or ("routingGeneration" in reassignment_mapping
                         and reassignment_mapping.get("leaseExpiresAt") != 0)
                     or ("routingGeneration" in reassignment_mapping

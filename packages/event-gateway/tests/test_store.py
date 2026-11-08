@@ -331,7 +331,7 @@ class StoreTests(unittest.TestCase):
         from event_gateway import messaging_protocol_v2
         from event_gateway.cloud import _iso
 
-        ident, envelope, admission = self.assigned_stock_v2_admitted()
+        ident, envelope, _admission = self.assigned_stock_v2_admitted()
         self.assertTrue(self.store.begin_stock_submit(ident, envelope["attemptId"]))
         queued = copy.deepcopy(envelope)
         queued["eventId"], queued["attemptId"] = str(uuid.uuid4()), str(uuid.uuid4())

@@ -576,6 +576,8 @@ class Store:
             old_profile = validate_runtime_profile(old_profile)
         except ProtocolError:
             raise StoreError("invalid_attachment") from None
+        # Exact built-in int checks reject bool-as-int in persisted JSON generations.
+        # pylint: disable=unidiomatic-typecheck
         if (not isinstance(mapping, dict)
                 or not isinstance(expected_mapping, dict)
                 or not all(key in expected_mapping for key in MESSAGING_METADATA)
