@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import ipaddress
 import json
+import logging
 import math
 import re
 import time
@@ -21,6 +22,8 @@ from .protocol import (
     matches_delivery_id, parse_acknowledgment, parse_envelope,
     shared_envelope_property,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CloudError(ValueError):
@@ -1148,6 +1151,8 @@ class CloudClient:
                 and error.code not in ("invalid_response", "unavailable", "redirect_refused")
             )
             if path == "/v1/dispatch/claim":
+                if definitive_refusal:
+                    logger.warning("event claim refused: HTTP %d (%s)", status, error.code)
                 raise CloudError(error.code, ambiguous=not definitive_refusal,
                                  definitive_refusal=definitive_refusal) from None
             if path in _AMBIGUOUS_COMMIT_PATHS and not definitive_refusal:
