@@ -821,6 +821,22 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(caught.exception.ambiguous, ambiguous)
             self.assertEqual(caught.exception.definitive_refusal, not ambiguous)
 
+    async def test_definitive_claim_refusal_logs_only_status_and_allowlisted_code(self):
+        self.status = 403
+        self.result = {"error": "denied"}
+        with self.assertLogs("event_gateway.cloud", level="WARNING") as captured:
+            with self.assertRaisesRegex(CloudError, "^denied$"):
+                await self.client.claim(FIXTURE["original"])
+        self.assertEqual(captured.output, [
+            "WARNING:event_gateway.cloud:event claim refused: HTTP 403 (denied)",
+        ])
+
+        self.status = 400
+        self.result = {"error": "unrecognized"}
+        with self.assertNoLogs("event_gateway.cloud", level="WARNING"):
+            with self.assertRaisesRegex(CloudError, "^unavailable$"):
+                await self.client.claim(FIXTURE["original"])
+
     async def test_untrusted_wire_body_is_closed_bounded_and_unambiguous(self):
         for raw, headers in ((b" " * 8193 + json.dumps(FIXTURE["admitted"]).encode(), JSON_HEADERS), (b'{}', {"content-type": "text/html"}),
                              (b'{}', {"content-type": None}), (b'{}', {"content-type": 1}),
