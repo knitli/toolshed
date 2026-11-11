@@ -863,13 +863,17 @@ def _stock_assignment_response(value, request, client):
 
 
 def _stock_watch_request(value):
-    """Validate the closed watch control union sent by the stock Gateway."""
+    """Validate watch control plus the local stock-client response binding."""
     if not isinstance(value, dict) or value.get("operation") not in (
             "watch_list", "watch_renew", "watch_readback"):
         raise CloudError("invalid_request")
     operation = value["operation"]
     common = {"operation", "runtimeId", "conversationId", "expectedRuntimeGeneration",
               "expectedAttachmentGeneration"}
+    if "client" in value:
+        common.add("client")
+        if value["client"] not in ("codex", "claude"):
+            raise CloudError("invalid_request")
     if operation == "watch_list":
         _closed(value, common | {"afterSubject"}, code="invalid_request")
         cursor = value["afterSubject"]
@@ -947,7 +951,7 @@ def _stock_watch_view(value):
 def _stock_watch_runtime(runtime, request, client):
     _closed(runtime, ("runtimeProfile", "runtimeId", "runtimeGeneration", "nodeId",
                       "nodeGeneration", "attachmentGeneration", "leaseUntil"))
-    expected_profile = {"profile": "assigned_stock_client", "client": "codex",
+    expected_profile = {"profile": "assigned_stock_client", "client": request.get("client", "codex"),
                         "conversationId": request["conversationId"]}
     if (runtime["runtimeId"] != request["runtimeId"]
             or not _same_json_value(runtime["runtimeProfile"], expected_profile)
@@ -1436,7 +1440,7 @@ class CloudClient:
         return _runtime_status_response(value, runtime_id)
 
     async def assigned_stock(self, request):
-        """Assign one explicit existing Codex conversation without a native witness."""
+        """Assign one explicit existing stock-client conversation without a native witness."""
         request = _stock_assignment_request(request)
         result = await self._post("/v1/runtimes/assigned-stock", request)
         try:
@@ -1445,9 +1449,12 @@ class CloudClient:
             raise CloudError(error.code, ambiguous=True) from None
 
     async def stock_watch(self, request):
-        """List or renew only owner-created watches held by this exact stock runtime."""
+        """List or renew watches held by this exact assigned stock-client runtime."""
         request = _stock_watch_request(request)
-        result = await self._post("/v1/runtimes/assigned-stock", request)
+        result = await self._post(
+            "/v1/runtimes/assigned-stock",
+            {key: value for key, value in request.items() if key != "client"},
+        )
         try:
             return _stock_watch_response(result, request, self)
         except CloudError as error:

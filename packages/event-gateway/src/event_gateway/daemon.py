@@ -335,6 +335,7 @@ def _watch_request(mapping, operation, *, after_subject=None, watch=None):
     request = {
         "operation": operation, "runtimeId": mapping["runtimeId"],
         "conversationId": profile["conversationId"],
+        "client": profile.get("client", "codex"),
         "expectedRuntimeGeneration": mapping["runtimeGeneration"],
         "expectedAttachmentGeneration": mapping["attachmentGeneration"],
     }
@@ -432,6 +433,8 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
         request = pending["request"]
         if (request.get("runtimeId") != runtime
                 or request.get("conversationId") != mapping["runtimeProfile"].get("conversationId")
+                or request.get("client", "codex")
+                != mapping["runtimeProfile"].get("client", "codex")
                 or request.get("expectedRuntimeGeneration") != mapping["runtimeGeneration"]
                 or request.get("expectedAttachmentGeneration") != mapping["attachmentGeneration"]):
             store.fail_stock_watch_request(runtime, row["watch"]["subject"],

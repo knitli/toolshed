@@ -16,6 +16,34 @@ FIXTURES = json.loads((PACKAGE / 'contracts/event-control-v1/fixtures.json').rea
 
 
 class StockWatchContractAdoptionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_watch_runtime_profile_matches_explicit_client_with_codex_default(self):
+        contract = FIXTURES['assignedStockWatch']
+        request = next(vector['value'] for vector in contract['requests']
+                       if vector['name'] == 'watch-list-first-page')
+        response = next(vector['value'] for vector in contract['responses']
+                        if vector['name'] == 'watch-list-page-limit')
+        self.assertEqual(_stock_watch_request(request), request)
+        sent_codex = []
+        self.assertEqual(await self.client(response, sent_codex, response).stock_watch(request), response)
+        self.assertEqual(json.loads(sent_codex[0]['body']), request)
+
+        claude_request = {**request, 'client': 'claude'}
+        claude_response = deepcopy(response)
+        claude_response['runtime']['runtimeProfile']['client'] = 'claude'
+        sent = []
+        self.assertEqual(await self.client(claude_response, sent, claude_response).stock_watch(
+            claude_request), claude_response)
+        self.assertEqual(json.loads(sent[0]['body']),
+                         {key: value for key, value in claude_request.items() if key != 'client'})
+
+        wrong_client_response = deepcopy(claude_response)
+        wrong_client_response['runtime']['runtimeProfile']['client'] = 'codex'
+        with self.assertRaisesRegex(CloudError, '^invalid_response$'):
+            await self.client(wrong_client_response, [], wrong_client_response).stock_watch(
+                claude_request)
+        with self.assertRaisesRegex(CloudError, '^invalid_request$'):
+            _stock_watch_request({**request, 'client': 'other'})
+
     async def test_exported_watch_vectors_match_gateway_request_and_response_validation(self):
         contract = FIXTURES['assignedStockWatch']
         requests = {vector['name']: vector for vector in contract['requests']}
