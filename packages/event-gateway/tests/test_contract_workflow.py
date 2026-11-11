@@ -45,6 +45,27 @@ ACTIVE_V2_SOURCE_SHA = "e954904603b3467e30bbeaf7446977b61fbcb9ef"
 ACTIVE_V2_SOURCE_TREE = "f47bb9345aa17f9b504965bd5c319163b569c9df"
 ACTIVE_V2_ARCHIVE = "tests/fixtures/messaging-v2-active-assigned-stock.zip"
 ACTIVE_V2_ARCHIVE_SHA256 = "adc3842002feb70851031312e85571866e216b25342382a99365c29d099b395c"
+CLAUDE_V2_NAME = "active-claude-v2"
+CLAUDE_V2_SOURCE_SHA = "39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939"
+CLAUDE_V2_SOURCE_TREE = "01640af90cc4273ef2f92ac6826c2e80b4a694c9"
+CLAUDE_V2_ARCHIVE = "tests/fixtures/messaging-v2-claude-active.zip"
+CLAUDE_V2_ARCHIVE_SHA256 = "942cc567bff265a5424cb590d7d820ad7b2e1e91637ebc944aeba8812f85812a"
+CLAUDE_V2_HASHES = {
+    "messaging-v2/messaging-protocol-semantics-v2.json": "0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f",
+    "messaging-v2/messaging-v2-wire.json": "a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032",
+    "messaging-v2/source-receipt.json": "70fc595a40850288f005f98e820bd6335554e570c4efee01a8dd5be215831b3b",
+    "messaging-v2/wire-source-receipt.json": "1a654e0cf135559e1e307fed9ad280a09f7f803362f5a50cc7aec376250f8e8d",
+}
+CLAUDE_V2_SOURCE_HASHES = {
+    "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts": "44068f5f4717ac84401e10dcd90cbc6875d32bdf3d513235ba6fb02c4e942a07",
+    "apps/os/packages/event-runtime/src/protocol.ts": "6cc08bcc9971d0c502bde662c964061d8dc006e25c4acc29ee14385ad274beb7",
+    "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": CLAUDE_V2_HASHES[
+        "messaging-v2/messaging-protocol-semantics-v2.json"
+    ],
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json": CLAUDE_V2_HASHES["messaging-v2/messaging-v2-wire.json"],
+    "apps/os/pnpm-lock.yaml": "62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549",
+}
 ACTIVE_V2_HASHES = {
     "messaging-v2/messaging-protocol-semantics-v2.json": "0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f",
     "messaging-v2/messaging-v2-wire.json": "a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032",
@@ -93,6 +114,20 @@ WATCH_FAMILY = {'name': 'assigned-stock-watch-lease-renewal',
             'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
             'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
             'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
+            'event-control-v1/fixtures.json': '0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038',
+            'event-control-v1/manifest.json': '07c44485cca3b81cc7e1b50476606baf0a6c35ebf6395c975e2aed4dc69d12b4'}}
+CLAUDE_EVENT_REVISION = '39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939'
+CLAUDE_CONTROL_REVISION = WATCH_CONTROL_REVISION
+CLAUDE_ARCHIVE = 'tests/fixtures/assigned-stock-claude-family.zip'
+CLAUDE_ARCHIVE_SHA256 = 'b2085a6b0064f7294eba7d6efc4c85ebf94a52c0f48e587eb715026b6fb7f682'
+CLAUDE_FAMILY = {'name': 'assigned-stock-claude-family',
+ 'eventRevision': CLAUDE_EVENT_REVISION,
+ 'controlRevision': CLAUDE_CONTROL_REVISION,
+ 'hashes': {'event-v1/protocol.schema.json': '60c5183225f65f49f9e62d94d10b2cb74d5e9ff166c122ae81215fc02ec96e37',
+            'event-v1/protocol.ts': '6cc08bcc9971d0c502bde662c964061d8dc006e25c4acc29ee14385ad274beb7',
+            'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+            'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
+            'event-v1/manifest.json': '73a57dc72a4c7544df0188d2d1bec94d591d8821539f901127b6cafc5163bf8d',
             'event-control-v1/fixtures.json': '0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038',
             'event-control-v1/manifest.json': '07c44485cca3b81cc7e1b50476606baf0a6c35ebf6395c975e2aed4dc69d12b4'}}
 HISTORICAL_ARCHIVE_SHA256 = "ad1e41e5add910d6bbf56960717fff9bdf6aae1ddd1f7a87bea2f5af3582b879"
@@ -167,6 +202,11 @@ class ContractWorkflowTests(unittest.TestCase):
     def active_contract_blobs(self):
         with zipfile.ZipFile(PACKAGE / ACTIVE_V2_ARCHIVE) as archive:
             return {SNAPSHOT + path: archive.read(f"snapshots/{ACTIVE_V2_NAME}/{path}")
+                    for path in MESSAGING_V2_PATHS}
+
+    def claude_contract_blobs(self):
+        with zipfile.ZipFile(PACKAGE / CLAUDE_V2_ARCHIVE) as archive:
+            return {SNAPSHOT + path: archive.read(f"snapshots/{CLAUDE_V2_NAME}/{path}")
                     for path in MESSAGING_V2_PATHS}
 
     def test_dormant_messaging_v2_profile_is_provenance_only(self):
@@ -263,6 +303,75 @@ class ContractWorkflowTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "Messaging v2 contract profile not authorized"):
                     self.verify_messaging_v2((active,))
 
+    def test_claude_messaging_v2_archive_pins_source_receipts_fixtures_and_zod(self):
+        archive_path = PACKAGE / CLAUDE_V2_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(), CLAUDE_V2_ARCHIVE_SHA256)
+        with zipfile.ZipFile(archive_path) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            expected_members = {"metadata.json"}
+            expected_members.update(f"snapshots/{CLAUDE_V2_NAME}/{path}" for path in MESSAGING_V2_PATHS)
+            expected_members.update(f"sources/{CLAUDE_V2_SOURCE_SHA}/{path}" for path in CLAUDE_V2_SOURCE_HASHES)
+            expected_members.update(f"dependencies/zod@4.6.5/{path}" for path in ACTIVE_V2_SCHEMA_HASHES)
+            expected_members.add("dependencies/zod@4.6.5/package.json")
+            self.assertEqual(len(archive.namelist()), len(set(archive.namelist())))
+            self.assertEqual(set(archive.namelist()), expected_members)
+            self.assertEqual(metadata["profile"], CLAUDE_V2_NAME)
+            self.assertEqual(metadata["adoption"], "active")
+            self.assertEqual(metadata["sourceCommit"], CLAUDE_V2_SOURCE_SHA)
+            self.assertEqual(metadata["sourceTree"], CLAUDE_V2_SOURCE_TREE)
+            self.assertEqual(metadata["contractHashes"], CLAUDE_V2_HASHES)
+            self.assertEqual({entry["path"]: entry["sha256"] for entry in metadata["sourceFiles"]},
+                             CLAUDE_V2_SOURCE_HASHES)
+            for path, digest in CLAUDE_V2_SOURCE_HASHES.items():
+                self.assertEqual(hashlib.sha256(archive.read(f"sources/{CLAUDE_V2_SOURCE_SHA}/{path}")).hexdigest(), digest)
+            schema = metadata["schemaDependency"]
+            self.assertEqual((schema["package"], schema["version"]), ("zod", "4.6.5"))
+            self.assertEqual({entry["path"]: entry["sha256"] for entry in schema["files"]},
+                             ACTIVE_V2_SCHEMA_HASHES)
+            for path, digest in ACTIVE_V2_SCHEMA_HASHES.items():
+                blob = archive.read(f"dependencies/zod@4.6.5/{path}")
+                self.assertEqual(hashlib.sha256(blob).hexdigest(), digest)
+            self.assertEqual(json.loads(archive.read("dependencies/zod@4.6.5/package.json"))["version"], "4.6.5")
+            for path in MESSAGING_V2_PATHS[:2]:
+                self.assertEqual(hashlib.sha256(archive.read(f"snapshots/{CLAUDE_V2_NAME}/{path}")).hexdigest(),
+                                 CLAUDE_V2_HASHES[path])
+            for receipt_path, fixture_path in zip(MESSAGING_V2_PATHS[2:], (
+                "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json",
+                "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json",
+            )):
+                receipt = json.loads(archive.read(f"snapshots/{CLAUDE_V2_NAME}/{receipt_path}"))
+                self.assertEqual(receipt["purpose"], "active_claude_v2_policy_adoption")
+                self.assertTrue(receipt["trustedPolicyAdoption"])
+                self.assertEqual(receipt["sourceCommit"], CLAUDE_V2_SOURCE_SHA)
+                self.assertEqual(receipt["sourceTree"], CLAUDE_V2_SOURCE_TREE)
+                self.assertEqual({entry["path"]: entry["sha256"] for entry in receipt["sourceFiles"]},
+                                 CLAUDE_V2_SOURCE_HASHES)
+                self.assertEqual(receipt["schemaDependency"], schema)
+                self.assertEqual(receipt["fixture"]["file"], fixture_path)
+                fixture_hash = CLAUDE_V2_HASHES[MESSAGING_V2_PATHS[0 if "semantics" in fixture_path else 1]]
+                self.assertEqual(receipt["fixture"]["sha256"], fixture_hash)
+
+        profile = next(profile for profile in POLICY["MESSAGING_V2_PROFILES"]
+                       if profile["name"] == CLAUDE_V2_NAME)
+        self.assertEqual((profile["adoption"], profile["hashes"]), ("active", CLAUDE_V2_HASHES))
+        self.blobs.update(self.claude_contract_blobs())
+        self.assertEqual(self.verify_messaging_v2(), (CLAUDE_V2_NAME, "active"))
+
+    def test_claude_messaging_v2_profile_rejects_snapshot_mutation_and_omission(self):
+        profile = next(profile for profile in POLICY["MESSAGING_V2_PROFILES"]
+                       if profile["name"] == CLAUDE_V2_NAME)
+        original = self.claude_contract_blobs()
+        for path in MESSAGING_V2_PATHS:
+            for missing in (False, True):
+                with self.subTest(path=path, missing=missing):
+                    self.blobs = original.copy()
+                    if missing:
+                        del self.blobs[SNAPSHOT + path]
+                    else:
+                        self.blobs[SNAPSHOT + path] += b"mutation"
+                    with self.assertRaises((ValueError, KeyError)):
+                        self.verify_messaging_v2((profile,))
+
     def test_active_messaging_v2_profile_publishes_distinct_status(self):
         self.blobs.update(self.active_contract_blobs())
         results, posts, _ = self.refresh()
@@ -299,6 +408,7 @@ class ContractWorkflowTests(unittest.TestCase):
         archive_path = PACKAGE / {
             STOCK_NAME: STOCK_ARCHIVE,
             WATCH_NAME: WATCH_ARCHIVE,
+            CLAUDE_FAMILY["name"]: CLAUDE_ARCHIVE,
         }.get(name, "tests/fixtures/trusted-contract-families.zip")
         with zipfile.ZipFile(archive_path) as archive:
             return {SNAPSHOT + path: archive.read(f"snapshots/{name}/{path}") for path in PATHS}
@@ -319,9 +429,13 @@ class ContractWorkflowTests(unittest.TestCase):
             stock = json.loads(archive.read("metadata.json"))
         with zipfile.ZipFile(PACKAGE / WATCH_ARCHIVE) as archive:
             watch = json.loads(archive.read("metadata.json"))
+        with zipfile.ZipFile(PACKAGE / CLAUDE_ARCHIVE) as archive:
+            claude = json.loads(archive.read("metadata.json"))
         self.assertEqual(stock["families"], [STOCK_FAMILY])
         self.assertEqual(watch["families"], [WATCH_FAMILY])
-        self.assertEqual(list(POLICY["FAMILIES"]), historical["families"] + [STOCK_FAMILY, WATCH_FAMILY])
+        self.assertEqual(claude["families"], [CLAUDE_FAMILY])
+        self.assertEqual(list(POLICY["FAMILIES"]),
+                         historical["families"] + [STOCK_FAMILY, WATCH_FAMILY, CLAUDE_FAMILY])
         self.assertEqual(len(historical["families"]), 15)
         self.assertEqual(set(historical["snapshots"]), {
             "legacy", "no-start", "native-start", "native-input-recorded",
@@ -332,7 +446,9 @@ class ContractWorkflowTests(unittest.TestCase):
         })
         self.assertEqual(tuple(POLICY["PATHS"]), PATHS)
         self.assertEqual(tuple(POLICY["MESSAGING_V2_PATHS"]), MESSAGING_V2_PATHS)
-        for expected in historical["families"] + [STOCK_FAMILY, WATCH_FAMILY]:
+        self.assertEqual([profile["name"] for profile in POLICY["MESSAGING_V2_PROFILES"]],
+                         ["dormant-source-conformance", ACTIVE_V2_NAME, CLAUDE_V2_NAME])
+        for expected in historical["families"] + [STOCK_FAMILY, WATCH_FAMILY, CLAUDE_FAMILY]:
             with self.subTest(family=expected["name"]):
                 self.blobs = self.approved_snapshot(expected["name"])
                 self.reads.clear()
@@ -1033,6 +1149,58 @@ class ContractWorkflowTests(unittest.TestCase):
             self.assertEqual(len(names), len(set(names)))
             for info in archive.infolist():
                 self.assertEqual(info.date_time, (2026, 11, 7, 0, 0, 0))
+
+    def test_claude_family_requires_complete_authorization(self):
+        self.assert_complete_family_authorization(CLAUDE_FAMILY["name"])
+
+    def test_claude_family_rejects_each_snapshot_mutation_or_omission(self):
+        self.assert_mutation_or_omission_rejected(CLAUDE_FAMILY["name"])
+
+    def test_claude_family_rejects_each_control_source_hash_mutation_or_omission(self):
+        self.assert_source_hash_mutation_or_omission_rejected(CLAUDE_FAMILY["name"])
+
+    def test_claude_family_source_provenance_and_closed_archive(self):
+        blobs = self.approved_snapshot(CLAUDE_FAMILY["name"])
+        event = json.loads(blobs[SNAPSHOT + "event-v1/manifest.json"])
+        control = json.loads(blobs[SNAPSHOT + "event-control-v1/manifest.json"])
+        event_sources = {entry["originalPath"]: entry["sha256"] for entry in event["files"]}
+        event_root = "apps/os/packages/event-runtime/"
+        source_paths = ("src/protocol.schema.json", "src/protocol.ts", "src/policy.ts",
+                        "__tests__/fixtures/protocol-v1.json")
+        self.assertEqual(event, {
+            "repository": "https://github.com/knitli/knitli-site.git",
+            "commit": CLAUDE_EVENT_REVISION,
+            "protocolVersion": 1,
+            "files": [{"file": path.rsplit("/", 1)[-1], "originalPath": event_root + path,
+                       "sha256": event_sources[event_root + path]} for path in source_paths],
+        })
+        self.assertEqual((event["commit"], control["revision"], control["fixturesSha256"]),
+                         (CLAUDE_EVENT_REVISION, CLAUDE_CONTROL_REVISION,
+                          CLAUDE_FAMILY["hashes"]["event-control-v1/fixtures.json"]))
+        self.assertEqual(control["zodVersion"], "4.6.5")
+        self.assertEqual(len(event_sources), 4)
+        self.assertEqual(len(control["sources"]), 109)
+        archive_path = PACKAGE / CLAUDE_ARCHIVE
+        self.assertEqual(hashlib.sha256(archive_path.read_bytes()).hexdigest(), CLAUDE_ARCHIVE_SHA256)
+        with zipfile.ZipFile(archive_path) as archive:
+            metadata = json.loads(archive.read("metadata.json"))
+            self.assertEqual(metadata["families"], [CLAUDE_FAMILY])
+            self.assertEqual(metadata["snapshots"], {
+                CLAUDE_FAMILY["name"]: "prepared-export:" + CLAUDE_CONTROL_REVISION,
+            })
+            self.assertEqual(set(metadata["sources"]), {CLAUDE_EVENT_REVISION, CLAUDE_CONTROL_REVISION})
+            self.assert_archived_sources(archive, CLAUDE_EVENT_REVISION, event_sources)
+            self.assert_archived_sources(archive, CLAUDE_CONTROL_REVISION, control["sources"])
+            for entry in event["files"]:
+                self.assertEqual(archive.read(f"sources/{CLAUDE_EVENT_REVISION}/{entry['originalPath']}"),
+                                 blobs[SNAPSHOT + "event-v1/" + entry["file"]])
+            expected = (["metadata.json"]
+                        + [f"snapshots/{CLAUDE_FAMILY['name']}/{path}" for path in PATHS]
+                        + [f"sources/{CLAUDE_EVENT_REVISION}/{path}" for path in sorted(event_sources)]
+                        + [f"sources/{CLAUDE_CONTROL_REVISION}/{path}" for path in sorted(control["sources"])])
+            self.assertEqual(archive.namelist(), expected)
+            for info in archive.infolist():
+                self.assertEqual(info.date_time, (2026, 11, 10, 0, 0, 0))
 
     def test_checked_in_snapshot_and_fixed_paths(self):
         accepted = self.verify()
