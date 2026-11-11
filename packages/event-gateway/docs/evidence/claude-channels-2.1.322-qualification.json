@@ -37,6 +37,11 @@
     "replyMatchesExpectedBody": true,
     "replyTargetsSubmittedMessage": true,
     "replyToolAt": "2026-11-11T02:47:13.654Z",
+    "replyToolResult": {
+      "isError": false,
+      "recordedAt": "2026-11-11T02:47:36.613Z",
+      "sent": true
+    },
     "sessionId": "7a654161-b81e-4087-8b83-d28bf34742aa",
     "sleepStartedAt": "2026-11-11T02:46:55.466Z",
     "sleepToolResultAt": "2026-11-11T02:47:11.383Z",
@@ -101,7 +106,8 @@
         "channelTimestamp": "2026-11-11T02:40:41.847Z",
         "classification": "Idle event received and replied to before the busy test.",
         "replyToolAt": "2026-11-11T02:40:43.515Z",
-        "source": "plugin:fakechat:fakechat"
+        "source": "plugin:fakechat:fakechat",
+        "transcriptRecordedAt": "2026-11-11T02:40:41.860Z"
       },
       "sessionId": "34497ae9-0c39-4da1-b380-acb94c716fe5"
     },
