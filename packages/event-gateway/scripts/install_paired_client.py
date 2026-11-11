@@ -146,23 +146,44 @@ def locked_requirements(data, project):
             "lock_project_mismatch")
     pending = list(root['dependencies'])
     selected = {}
+    activated_extras = set()
     while pending:
         dependency = pending.pop()
-        require(set(dependency) <= {'name', 'marker'} and dependency.get('marker') in (
+        marker = dependency.get('marker')
+        extras = dependency.get('extra', [])
+        require(set(dependency) <= {'name', 'marker', 'extra'}
+                and isinstance(extras, list) and all(isinstance(extra, str) for extra in extras)
+                and set(extras) <= ({'crypto'} if dependency.get('name') == 'pyjwt' else set())
+                and marker in (
             None, "implementation_name != 'PyPy'", "platform_python_implementation != 'PyPy'",
+            "python_full_version < '3.15'", "sys_platform == 'win32'", "sys_platform != 'emscripten'",
         ), "unsupported_lock_marker")
-        name = dependency['name']
-        if name in selected:
+        if (
+                marker == "python_full_version < '3.15'" and sys.version_info >= (3, 15)
+                or marker == "sys_platform == 'win32'" and sys.platform != 'win32'
+                or marker == "sys_platform != 'emscripten'" and sys.platform == 'emscripten'
+        ):
             continue
+        name = dependency['name']
         row = packages[name]
         require(row['source'] == {'registry': 'https://pypi.org/simple'}
                 and re.fullmatch(r'[a-z0-9][a-z0-9-]*', name)
                 and re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', row['version']), "unsupported_locked_package")
-        hashes = sorted({wheel['hash'] for wheel in row['wheels']})
-        require(hashes and all(value.startswith('sha256:') and V.sha(value[7:]) for value in hashes),
-                "missing_locked_wheel_hash")
-        selected[name] = name + '==' + row['version'] + ''.join(' --hash=' + value for value in hashes)
-        pending.extend(row.get('dependencies', []))
+        if name not in selected:
+            hashes = sorted({wheel['hash'] for wheel in row['wheels']})
+            require(hashes and all(value.startswith('sha256:') and V.sha(value[7:]) for value in hashes),
+                    "missing_locked_wheel_hash")
+            selected[name] = name + '==' + row['version'] + ''.join(' --hash=' + value for value in hashes)
+            pending.extend(row.get('dependencies', []))
+        for extra in extras:
+            activation = (name, extra)
+            if activation in activated_extras:
+                continue
+            optional_dependencies = row.get('optional-dependencies', {})
+            require(isinstance(optional_dependencies, dict)
+                    and isinstance(optional_dependencies.get(extra), list), "missing_locked_extra")
+            activated_extras.add(activation)
+            pending.extend(optional_dependencies[extra])
     return '\n'.join(selected[name] for name in sorted(selected)) + '\n'
 
 

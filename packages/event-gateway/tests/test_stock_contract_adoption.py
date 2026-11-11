@@ -8,10 +8,10 @@ import zipfile
 
 
 PACKAGE = Path(__file__).resolve().parents[1]
-FAMILY = 'assigned-stock-watch-lease-renewal'
-EVENT_REVISION = '9503b8e2a99fbe099a4b90cb576a17dcf4b786aa'
+FAMILY = 'assigned-stock-claude-family'
+EVENT_REVISION = '39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939'
 CONTROL_REVISION = 'cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49'
-ARCHIVE = PACKAGE / 'tests/fixtures/assigned-stock-watch-lease-family.zip'
+ARCHIVE = PACKAGE / 'tests/fixtures/assigned-stock-claude-family.zip'
 EVENT_ONLY_SOURCES = {
     'apps/os/packages/event-runtime/src/protocol.schema.json',
     'apps/os/packages/event-runtime/__tests__/fixtures/protocol-v1.json',

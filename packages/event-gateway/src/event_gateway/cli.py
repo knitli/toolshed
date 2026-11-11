@@ -78,7 +78,7 @@ def _parser(*, enrollment_only=False, stock_only=False):
     if stock_only:
         run = commands.add_parser("run", help="Run the stock-only control daemon")
         run.add_argument("--dispatch-config", type=Path, required=True,
-                         help="Private configuration with stockCodexBinary enabled")
+                         help="Private configuration with stock-client event delivery enabled")
         _add_stock_control_commands(commands)
         _add_stock_recovery_commands(commands)
         _add_github_read_commands(commands)
@@ -128,15 +128,20 @@ def _add_stock_control_commands(commands):
     runtime_status = commands.add_parser("runtime-status", help="Read stored cloud runtime authority")
     runtime_status.add_argument("--runtime-id", required=True)
     runtime_status.add_argument("--cloud-config", type=Path, required=True)
-    stock = commands.add_parser("stock-control", help="Assign an existing Codex conversation to a stock runtime")
+    stock = commands.add_parser("stock-control", help="Assign an existing Codex or Claude conversation to a stock runtime")
     stock.add_argument("operation", choices=("attach", "renew"))
     stock.add_argument("--runtime-id", required=True)
-    stock.add_argument("--conversation-id", required=True, help="Canonical Codex conversation UUID")
+    stock.add_argument("--conversation-id", required=True, help="Canonical client conversation UUID")
+    stock.add_argument("--client", choices=("codex", "claude"), default="codex",
+                       help="Stock client owning the existing conversation (default: codex)")
     stock.add_argument("--cloud-config", type=Path, required=True)
     stock.add_argument("--expected-runtime-generation", type=int)
     stock.add_argument("--expected-attachment-generation", type=int)
     stock.add_argument("--messaging-handoff", type=Path,
                        help="Private owner route-readback JSON for explicit Messaging assignment import (renew only)")
+    channel = commands.add_parser("claude-channel", help="Serve one explicitly assigned Claude Channel conversation")
+    channel.add_argument("--runtime-id", required=True)
+    channel.add_argument("--conversation-id", required=True)
 
 def _add_stock_recovery_commands(commands):
     recovery = commands.add_parser("stock-recovery", help="Inspect or locally abandon an ambiguous stock delivery")
@@ -222,6 +227,12 @@ def _execute_command(args, state_dir, parser, *, stock_only=False):
         return 0
     if args.command == "stock-control":
         return _execute_stock_control(args, state_dir)
+    if args.command == "claude-channel":
+        from .claude_channel import main as serve_claude_channel
+        return serve_claude_channel([
+            "--state-dir", str(state_dir), "--runtime-id", args.runtime_id,
+            "--conversation-id", args.conversation_id,
+        ])
     if args.command == "stock-recovery":
         if args.operation == "abandon" and not all((args.delivery_id, args.attempt_id,
                                                       args.expected_identity_sha256)):
@@ -372,9 +383,10 @@ def _execute_native_lifecycle(args, state_dir, operation):
 
 
 def _execute_stock_control(args, state_dir):
+    client = getattr(args, "client", "codex")
     request_value = {
         "operation": args.operation, "runtimeId": args.runtime_id,
-        "conversationId": args.conversation_id,
+        "conversationId": args.conversation_id, "client": client,
         "expectedRuntimeGeneration": args.expected_runtime_generation,
         "expectedAttachmentGeneration": args.expected_attachment_generation,
     }
@@ -427,7 +439,7 @@ def _execute_stock_control(args, state_dir):
                         invalid_mapping = invalid_mapping or (
                             not isinstance(reassignment_mapping.get("runtimeProfile"), dict)
                             or reassignment_mapping["runtimeProfile"].get("profile") != "assigned_stock_client"
-                            or reassignment_mapping["runtimeProfile"].get("client") != "codex"
+                            or reassignment_mapping["runtimeProfile"].get("client") not in ("codex", "claude")
                             or type(reassignment_mapping.get("consumerGeneration")) is not int
                             or reassignment_mapping["consumerGeneration"] != reassignment_mapping["attachmentGeneration"]
                         )
@@ -459,7 +471,7 @@ def _execute_stock_control(args, state_dir):
                 generation_pair = (args.expected_runtime_generation, args.expected_attachment_generation)
             result.update(outcome="unknown", recovery={
                 "operation": "renew", "runtimeId": args.runtime_id,
-                "runtimeProfile": {"profile": "assigned_stock_client", "client": "codex",
+                "runtimeProfile": {"profile": "assigned_stock_client", "client": client,
                                    "conversationId": args.conversation_id},
                 "expectedRuntimeGeneration": generation_pair[0],
                 "expectedAttachmentGeneration": generation_pair[1],
@@ -547,7 +559,7 @@ def _stock_renew_mapping_matches(mapping, args, cloud):
         and mapping.get("attachmentGeneration") == args.expected_attachment_generation
         and mapping.get("consumerGeneration") == args.expected_attachment_generation
         and mapping.get("runtimeProfile") == {
-            "profile": "assigned_stock_client", "client": "codex",
+            "profile": "assigned_stock_client", "client": getattr(args, "client", "codex"),
             "conversationId": args.conversation_id,
         }
     )

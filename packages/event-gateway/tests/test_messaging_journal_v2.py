@@ -51,16 +51,16 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         return (self.store.db.execute('PRAGMA user_version').fetchone()[0],
                 tuple(self.store.db.iterdump()))
 
-    def test_v1_open_stays_four_v2_write_and_reopen_preserve_five(self):
-        self.assertEqual(self.snapshot()[0], 4)
+    def test_open_and_messaging_write_migrate_schema_to_six(self):
+        self.assertEqual(self.snapshot()[0], 6)
         self.store.close()
         self.store = Store(self.path, clock=lambda: self.now)
-        self.assertEqual(self.snapshot()[0], 4)
+        self.assertEqual(self.snapshot()[0], 6)
         self.provision()
-        self.assertEqual(self.snapshot()[0], 5)
+        self.assertEqual(self.snapshot()[0], 6)
         self.store.close()
         self.store = Store(self.path, clock=lambda: self.now)
-        self.assertEqual(self.snapshot()[0], 5)
+        self.assertEqual(self.snapshot()[0], 6)
         self.assertEqual(self.store.get_attachment(self.event['runtimeId']), self.mapping)
 
     def test_authenticated_complete_envelope_is_held_and_not_pollable(self):
@@ -240,7 +240,7 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
                         self.provision()
                     self.assertEqual(caught.exception.code, 'invalid_attachment')
                     self.assertEqual(self.snapshot(), before)
-                    self.assertEqual(self.snapshot()[0], 4)
+                    self.assertEqual(self.snapshot()[0], 6)
 
     def test_same_event_id_coexists_in_v1_and_v2(self):
         self.provision()
@@ -384,7 +384,7 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises((StoreError, sqlite3.Error)):
             self.provision()
         self.assertEqual(self.snapshot(), before)
-        self.assertEqual(self.snapshot()[0], 4)
+        self.assertEqual(self.snapshot()[0], 6)
 
     def test_failed_delivery_write_leaves_no_delivery_or_attempt(self):
         self.provision()
@@ -429,7 +429,7 @@ class MessagingJournalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.snapshot(), before)
         self.store.db.execute('DROP TRIGGER fail_delivery')
         self.accept()
-        self.assertEqual(self.snapshot()[0], 5)
+        self.assertEqual(self.snapshot()[0], 6)
 
     def test_metadata_rotation_fences_and_incarnation_cannot_reset(self):
         self.provision()

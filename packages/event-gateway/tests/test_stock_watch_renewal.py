@@ -63,6 +63,15 @@ def runtime_response(mapping_value):
 
 
 class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
+    def test_watch_request_carries_assigned_client_and_defaults_old_mappings_to_codex(self):
+        legacy = mapping(1)
+        del legacy["runtimeProfile"]["client"]
+        self.assertEqual(daemon._watch_request(legacy, "watch_list")["client"], "codex")
+
+        claude = deepcopy(legacy)
+        claude["runtimeProfile"]["client"] = "claude"
+        self.assertEqual(daemon._watch_request(claude, "watch_list")["client"], "claude")
+
     def test_watch_factory_copies_default_subject(self):
         first = watch(1)
         second = watch(2)
@@ -299,7 +308,9 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             store.put_attachment(local)
             await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
             self.assertEqual(len(list_requests), 16)
-            self.assertTrue(all(len(list_requests[index]) == 6 for index in range(16)))
+            self.assertTrue(all(
+                len(list_requests[index]) == 7 and list_requests[index]["client"] == "codex"
+                for index in range(16)))
             self.assertEqual(now[0], started + 32)
             self.assertEqual(len(store.stock_watch_rows(RUNTIME)), 32)
             self.assertEqual(len(renew_requests), 1)

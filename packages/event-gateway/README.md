@@ -92,8 +92,8 @@ or delivery. This is a trusted local installation boundary, not a same-user Pyth
 sandbox: the owner of the environment can alter or invoke installed code directly.
 Raw `uv tool install` does not provide the install profiles' verification.
 
-For stock Codex assignment and daemon use without a promoted native pair, install
-the stock profile:
+For assigned stock-client delivery without a promoted native pair, install the
+stock profile:
 
 ```sh
 python3 -I scripts/install_paired_client.py \
@@ -104,9 +104,10 @@ python3 -I scripts/install_paired_client.py \
 
 It performs the same protected-main source, wheel, lock, dependency and hash checks,
 but installs no native artifact and exposes only `status`, `enroll`, `run`,
-`stock-control`, `runtime-status`, `detach`, and the screened GitHub read/material
-commands. `run` requires an explicit dispatch config with `stockCodexBinary`; the
-stock-only daemon refuses native delivery and leaves any prior native attempt
+`stock-control`, `claude-channel`, `runtime-status`, `detach`, and the screened
+GitHub read/material commands. `run` requires an explicit dispatch config;
+`stockCodexBinary` is needed only for Codex assignments. The stock-only daemon
+refuses native delivery and leaves any prior native attempt
 evidence untouched. The profile cannot launch a native TUI or invoke native
 attach, renew, transfer, or reconciliation commands. Keep the dispatch config
 private as described below. Like enrollment-only, stock-only restricts the
@@ -221,28 +222,71 @@ v2 stock notification also supplies its canonical message ID for the client's
 existing Messaging MCP `read` tool. That client must already be authenticated
 as the assigned agent; the ID grants no access. Messaging v2
 delivery and live pilot activation remain disabled/unqualified. The assigned-stock
-path durably records command acceptance. The shared Messaging authority settles
-that receipt or a proven no-start before allowing a fresh wake; uncertain
+Codex path durably records command acceptance; Claude records an explicit
+client-reported receipt. The shared Messaging authority settles that receipt
+or a proven no-start before allowing a fresh wake; uncertain
 outcomes stay ambiguous and are never blindly resent.
 
-The stock Codex path is opt-in and names an existing canonical conversation UUID;
-it never discovers or selects a latest thread. Reuse the private cloud config and
-node key below. First assignment creates generation 1:
+The stock Codex and Claude paths are opt-in and name an existing canonical
+conversation UUID; neither discovers or selects a latest session. Reuse the
+private cloud config and node key below. First assignment creates generation 1.
+Codex remains the default client; select Claude explicitly with `--client claude`:
 
 For the operator procedure, exact owner handoff, ambiguous recovery, and client
 support evidence, see the [stock client operations runbook](docs/stock-client-operations-2026-11-04.md).
 
 ```sh
 knitli-event-gateway stock-control attach \
-  --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \
+  --runtime-id RUNTIME-UUID --conversation-id CLAUDE-CONVERSATION-UUID \
+  --client claude \
   --cloud-config /private/path/cloud-config.json
 ```
+
+Claude must own the MCP server over stdio. After assigning the conversation,
+write a private MCP config with the installed Gateway's absolute path:
+
+```json
+{
+  "mcpServers": {
+    "knitli-events": {
+      "command": "/absolute/path/to/knitli-event-gateway",
+      "args": [
+        "--state-dir", "/private/path/gateway-state",
+        "claude-channel", "--runtime-id", "RUNTIME-UUID",
+        "--conversation-id", "CLAUDE-CONVERSATION-UUID"
+      ]
+    }
+  }
+}
+```
+
+Resume that exact existing conversation with this config. During the Channels
+research preview, the custom server needs the interactive development-channel
+confirmation and the organization's Channels policy must allow it:
+
+```sh
+claude --resume CLAUDE-CONVERSATION-UUID \
+  --strict-mcp-config --mcp-config /private/path/claude-mcp.json \
+  --dangerously-load-development-channels server:knitli-events
+```
+
+Use the same conversation UUID in the assignment, MCP config, and `--resume`.
+This is an operator assertion; the adapter does not discover or verify Claude's
+session identity. Do not reuse the config in another conversation. A private
+lock prevents two channel servers from polling the same assignment at once.
+
+The channel sends an opaque event reference. An MCP notification reaching the
+transport is not a receipt; only the explicit `client_reported` callback closes
+that delivery obligation. It does not assert completed work. An uncertain
+notification is never replayed. See the [Channels reference](https://code.claude.com/docs/en/channels-reference)
+for the preview's opt-in and receipt limits.
 
 Renew with the exact returned generation pair:
 
 ```sh
 knitli-event-gateway stock-control renew \
-  --runtime-id RUNTIME-UUID --conversation-id CODEX-CONVERSATION-UUID \
+  --runtime-id RUNTIME-UUID --conversation-id CLAUDE-CONVERSATION-UUID \
+  --client claude \
   --expected-runtime-generation 1 --expected-attachment-generation 1 \
   --cloud-config /private/path/cloud-config.json
 ```
@@ -253,12 +297,13 @@ using the generation pair printed by the command; do not send new client input
 to resolve uncertainty. Reassignment fences future submissions; it does not
 cancel input already accepted by the old conversation.
 
-To enable the local adapter, the private dispatch config must also name
-`"stockCodexBinary": "/absolute/path/to/codex"`. Omitting it disables stock
-dispatch. The cloud profile has its own explicit principal/agent canary gate;
-the native binding gate remains separate. The existing runtime lease lasts
-90 seconds. A running daemon with `stockCodexBinary` configured renews an
-existing assigned-stock mapping every 30 seconds using its exact conversation
+Codex dispatch requires `"stockCodexBinary": "/absolute/path/to/codex"` in the
+private dispatch config. Claude uses the stock-only installation's daemon and
+MCP channel without a Codex binary. That daemon renews Claude assignments;
+Codex assignments are renewed only when its binary is configured. The cloud
+profile has its own explicit principal/agent canary gate; the native binding
+gate remains separate. The runtime lease lasts 90 seconds. The daemon renews
+existing supported assignments every 30 seconds using their exact conversation
 and generation pair; it does not start, inspect, or reassign client sessions.
 Renewal stops for that exact mapping after a definitive refusal or mismatched
 response. An ambiguous transport result retries the same renewal with bounded
@@ -392,8 +437,10 @@ Default state is `~/.local/state/knitli-event-gateway`, with mode 0700 directori
 and 0600 files/socket. `--state-dir PATH` accepts a private directory without
 symlink components; use canonical `/private/tmp` paths for macOS scratch tests.
 Never place it in a shared or synced directory. Stop the daemon before upgrading;
-unsupported database versions refuse to open. Restart quarantines unfinished
-native attempts as ambiguous, preserving receipts and explicit recovery needs.
+unsupported database versions refuse to open. This release upgrades the journal
+to schema 6, which older Gateway versions cannot reopen; use fresh private state
+for qualification trials. Restart quarantines unfinished native attempts as
+ambiguous, preserving receipts and explicit recovery needs.
 
 No service is installed or native client resumed on reboot. User-service
 installation and full owner enrollment remain qualification work after the
@@ -402,7 +449,7 @@ presence/authority seams are implemented.
 ## Contract and validation
 
 `contracts/event-v1/manifest.json` pins the canonical OS schema, semantic
-reference, and fixture bytes at `9503b8e2a99fbe099a4b90cb576a17dcf4b786aa`.
+reference, and fixture bytes at `39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939`.
 The fixture embeds the canonical 45 semantic verdicts: 30 raw-parser, six
 delivery-digest and nine ACK-binding cases. Both runtimes execute these cases;
 normal Python tests require the embedded corpus, including optimized-mode

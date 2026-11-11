@@ -53,20 +53,51 @@ async def running_daemon(state_dir):
 
 
 class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
-    async def test_stock_only_serve_requires_dispatch_client_config(self):
+    async def test_stock_only_serve_requires_dispatch_config(self):
         with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, \
                 patch.object(daemon, "load_dispatch_config") as load_config:
             with self.assertRaisesRegex(daemon.SecurityError, "stock_profile_requires_stock_client"):
                 await daemon.serve(Path(directory), stock_only=True)
             load_config.assert_not_called()
 
-        with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, \
-                self.subTest(configured="missing stockCodexBinary"):
-            config_path = Path(directory) / "dispatch.json"
-            with patch.object(daemon, "load_dispatch_config", return_value=({"version": 1}, object())) as load_config:
-                with self.assertRaisesRegex(daemon.SecurityError, "stock_profile_requires_stock_client"):
-                    await daemon.serve(Path(directory), dispatch_config=config_path, stock_only=True)
-            load_config.assert_called_once_with(config_path, Path(directory))
+    async def test_claude_control_handler_runs_only_for_exact_rpc_shapes(self):
+        calls = []
+
+        class ClaudeStore:
+            def register_claude_channel(self, runtime_id, conversation_id):
+                calls.append(("register", runtime_id, conversation_id))
+                return {"runtimeId": runtime_id}
+
+            def claim_claude_handoff(self, runtime_id, conversation_id):
+                calls.append(("poll", runtime_id, conversation_id))
+                return {"delivery": None}
+
+            def record_claude_client_reported(self, *arguments):
+                calls.append(("reported", *arguments))
+
+        store = ClaudeStore()
+        runtime_id, conversation_id = str(uuid.uuid4()), str(uuid.uuid4())
+        register = {"command": "claude-register", "runtimeId": runtime_id,
+                    "conversationId": conversation_id}
+        self.assertEqual(daemon._execute_control_command(store, register), {
+            "registered": True, "runtimeId": runtime_id,
+        })
+        self.assertEqual(daemon._execute_control_command(store, {
+            "command": "claude-poll", "runtimeId": runtime_id,
+            "conversationId": conversation_id,
+        }), {"delivery": None})
+        callback = {"command": "claude-client-reported", "runtimeId": runtime_id,
+                    "conversationId": conversation_id, "deliveryId": "delivery",
+                    "attemptId": "attempt", "receiptToken": "token"}
+        self.assertEqual(daemon._execute_control_command(store, callback), {"recorded": True})
+        self.assertEqual(daemon._execute_control_command(store, {**register, "extra": True}), {
+            "reason": "unsupported_command",
+        })
+        self.assertEqual(calls, [
+            ("register", runtime_id, conversation_id),
+            ("poll", runtime_id, conversation_id),
+            ("reported", runtime_id, conversation_id, "delivery", "attempt", "token"),
+        ])
 
     async def test_stock_recovery_controls_use_store_and_reject_extra_fields(self):
         calls = []
@@ -784,9 +815,92 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cloud.requests, [{
             "operation": "renew", "runtimeId": mapping["runtimeId"],
             "conversationId": mapping["runtimeProfile"]["conversationId"],
+            "client": "codex",
             "expectedRuntimeGeneration": 4, "expectedAttachmentGeneration": 7,
         }])
         self.assertEqual(store.renewed[0][0], mapping)
+
+    async def test_claude_stock_renewal_selects_assigned_client(self):
+        now = time.time()
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "principal": "owner@example.com", "agent": "codex",
+            "nodeId": str(uuid.uuid4()), "nodeGeneration": 2, "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": now + 90,
+            "runtimeProfile": {"profile": "assigned_stock_client", "client": "claude",
+                               "conversationId": str(uuid.uuid4())},
+        }
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return now
+
+            @staticmethod
+            def renew_stock_attachment(_expected, _lease):
+                return True
+
+        class FakeCloud:
+            request = None
+
+            async def assigned_stock(self, request):
+                self.request = request
+                return {"leaseUntil": _iso(now + 90)}
+
+        cloud = FakeCloud()
+        self.assertTrue(await daemon._renew_stock_mapping(
+            FakeStore(), cloud, asyncio.Event(), mapping, set(),
+        ))
+        self.assertEqual(cloud.request["client"], "claude")
+
+    async def test_claude_only_stock_renewal_skips_undispatchable_codex(self):
+        now = time.time()
+        common = {
+            "principal": "owner@example.com", "agent": "codex", "nodeId": str(uuid.uuid4()),
+            "nodeGeneration": 2, "runtimeGeneration": 4, "attachmentGeneration": 7,
+            "leaseExpiresAt": now + 90,
+        }
+        mappings = [
+            {**common, "runtimeId": str(uuid.uuid4()), "runtimeProfile": {
+                "profile": "assigned_stock_client", "client": client,
+                "conversationId": str(uuid.uuid4()),
+            }}
+            for client in ("codex", "claude")
+        ]
+        stop = asyncio.Event()
+
+        class FakeStore:
+            renewed = []
+
+            @staticmethod
+            def clock():
+                return now
+
+            @staticmethod
+            def list_attachments():
+                return mappings
+
+            def renew_stock_attachment(self, mapping, _lease):
+                self.renewed.append(mapping["runtimeId"])
+                stop.set()
+                return True
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = common["nodeId"], common["nodeGeneration"]
+
+            def __init__(self):
+                self.requests = []
+
+            async def assigned_stock(self, request):
+                self.requests.append(request)
+                return {"leaseUntil": _iso(now + 90)}
+
+        store, cloud = FakeStore(), FakeCloud()
+        await asyncio.wait_for(daemon._stock_renewal_worker(
+            store, cloud, stop, stock_codex_enabled=False,
+        ), 1)
+        self.assertEqual([request["client"] for request in cloud.requests], ["claude"])
+        self.assertEqual(store.renewed, [mappings[1]["runtimeId"]])
 
     async def test_stock_renewal_suspends_mapping_when_local_cas_fails(self):
         mapping = {
@@ -1186,7 +1300,7 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
         async def failed_watch_worker(*_args):
             raise RuntimeError("unexpected watch renewal failure")
 
-        async def wait_for_stop(_store, _cloud, stop, *_args):
+        async def wait_for_stop(_store, _cloud, stop, *_args, **_kwargs):
             await stop.wait()
 
         async def wait_for_dispatch(_gateway, stop):
@@ -1195,8 +1309,7 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
         async def fake_start_server(*_args, **_kwargs):
             return FakeServer()
 
-        config = {"stockCodexBinary": "/bin/true", "transportKeys": {},
-                  "listenHost": "127.0.0.1", "listenPort": 0}
+        config = {"transportKeys": {}, "listenHost": "127.0.0.1", "listenPort": 0}
         cloud = type("Cloud", (), {"node_id": "audience"})()
         with tempfile.TemporaryDirectory(dir=TEMPORARY_ROOT) as directory, \
                 patch.object(daemon, "load_dispatch_config", return_value=(config, cloud)), \
@@ -1206,7 +1319,9 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(daemon, "_dispatch_worker", wait_for_dispatch), \
                 patch.object(daemon.asyncio, "start_unix_server", side_effect=fake_start_server), \
                 patch.object(daemon.os, "chmod"):
-            await asyncio.wait_for(daemon.serve(directory, dispatch_config="dispatch.json"), 1)
+            await asyncio.wait_for(daemon.serve(
+                directory, dispatch_config="dispatch.json", stock_only=True,
+            ), 1)
         self.assertEqual(len(listeners), 1)
         self.assertTrue(listeners[0].stopped)
 

@@ -352,12 +352,16 @@ class LegacyStoredReceiptRecoveryTests(unittest.IsolatedAsyncioTestCase):
             )
         query = "SELECT CAST(started_receipt AS BLOB), CAST(native_ack AS BLOB) FROM attempts WHERE delivery_id=?"
         before = tuple(fixture.store.db.execute(query, (delivery_id,)).fetchone())
-        schema = fixture.store.db.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall()
+        # Recreate the pre-Claude schema-4 journal before testing its migration.
+        fixture.store.db.execute("ALTER TABLE attempts DROP COLUMN claude_handoff")
+        fixture.store.db.execute("ALTER TABLE attempts DROP COLUMN claude_receipt_hash")
+        fixture.store.db.execute("PRAGMA user_version=4")
         self.assertEqual(fixture.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
 
         fixture.restart()
-        self.assertEqual(fixture.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
-        self.assertEqual(fixture.store.db.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall(), schema)
+        self.assertEqual(fixture.store.db.execute("PRAGMA user_version").fetchone()[0], 6)
+        columns = {row[1] for row in fixture.store.db.execute("PRAGMA table_info(attempts)")}
+        self.assertTrue({"claude_handoff", "claude_receipt_hash"} <= columns)
         self.assertEqual(tuple(fixture.store.db.execute(query, (delivery_id,)).fetchone()), before)
         self.assertEqual(validate_receipt(attempt["native_request"],
                                           fixture.store.current_attempt(delivery_id)["started_receipt"]),

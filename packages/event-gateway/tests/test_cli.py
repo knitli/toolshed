@@ -76,7 +76,7 @@ class CliTests(unittest.TestCase):
         commands = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
         self.assertEqual(set(commands.choices), {
             "status", "enroll", "run", "runtime-status", "stock-control",
-            "stock-recovery",
+        "stock-recovery", "claude-channel",
             "github-event-read", "github-source-read", "github-source-material", "detach",
         })
         output = io.StringIO()

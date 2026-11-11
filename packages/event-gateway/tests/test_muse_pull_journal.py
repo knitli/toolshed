@@ -338,7 +338,7 @@ os._exit(0)
         )
         with self.assertRaises(StoreError):
             Store(self.path)
-        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 6)
 
 
 if __name__ == "__main__":

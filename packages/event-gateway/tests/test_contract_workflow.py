@@ -1359,7 +1359,7 @@ class ContractWorkflowTests(unittest.TestCase):
             self.assertIn(payload["context"], ("Event Gateway / trusted contract",
                                                 "Event Gateway / Messaging v2 contract"))
             self.assertEqual(payload["target_url"], "https://example.test/run")
-        self.assertIn("Active trusted Messaging v2 profile verified: " + ACTIVE_V2_NAME,
+        self.assertIn("Active trusted Messaging v2 profile verified: " + CLAUDE_V2_NAME,
                       [payload["description"] for _, payload in posts])
 
     def test_trusted_messaging_v2_profile_has_distinct_status(self):

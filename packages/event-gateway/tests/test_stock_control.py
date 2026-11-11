@@ -14,7 +14,10 @@ from contextlib import redirect_stdout
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from event_gateway import cli, daemon
-from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso
+from event_gateway.cloud import (
+    CloudClient, CloudError, Credentials, _iso, _stock_assignment_request,
+    _stock_assignment_response,
+)
 from event_gateway.gateway import Gateway
 from event_gateway import messaging_protocol_v2
 from event_gateway.protocol import derive_delivery_id
@@ -41,6 +44,32 @@ def response(status="attached", **changes):
 
 
 class StockControlTests(unittest.IsolatedAsyncioTestCase):
+    def test_claude_assignment_is_explicit_and_legacy_request_defaults_to_codex(self):
+        base = {
+            "operation": "attach", "runtimeId": RUNTIME, "conversationId": NEW_CONVERSATION,
+            "expectedRuntimeGeneration": None, "expectedAttachmentGeneration": None,
+        }
+        self.assertEqual(_stock_assignment_request(base)["client"], "codex")
+        request = _stock_assignment_request({**base, "client": "claude"})
+        self.assertEqual(request["client"], "claude")
+
+        class Client:
+            node_id, node_generation = NODE, 2
+
+            @staticmethod
+            def _clock():
+                return NOW
+
+        result = _stock_assignment_response(
+            response(runtimeProfile={**PROFILE, "client": "claude",
+                                     "conversationId": NEW_CONVERSATION}),
+            request, Client(),
+        )
+        self.assertEqual(result["runtimeProfile"], {
+            "profile": "assigned_stock_client", "client": "claude",
+            "conversationId": NEW_CONVERSATION,
+        })
+
     def test_cloud_confirmed_stock_reattach_replaces_stale_messaging_mapping(self):
         now = NOW
         with tempfile.TemporaryDirectory() as temp:

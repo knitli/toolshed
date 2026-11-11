@@ -43,9 +43,38 @@ def status(store, dispatch=None):
     }
 
 
-def _execute_control_command(store, request_value, dispatch=None):
-    if request_value == {"command": "status"}:
-        return status(store, dispatch)
+def _claude_control_command(store, request_value):
+    """Handle exact-shape Claude channel RPCs; return None for other commands."""
+    if not isinstance(request_value, dict):
+        return None
+    command = request_value.get("command")
+    if command not in ("claude-register", "claude-poll", "claude-client-reported"):
+        return None
+    base = {"command", "runtimeId", "conversationId"}
+    valid_identity = (_uuid(request_value.get("runtimeId"))
+                      and _uuid(request_value.get("conversationId")))
+    if command == "claude-register" and set(request_value) == base and valid_identity:
+        return {"registered": True, **store.register_claude_channel(
+            request_value["runtimeId"], request_value["conversationId"],
+        )}
+    if command == "claude-poll" and set(request_value) == base and valid_identity:
+        return store.claim_claude_handoff(
+            request_value["runtimeId"], request_value["conversationId"],
+        )
+    callback = base | {"deliveryId", "attemptId", "receiptToken"}
+    if (command == "claude-client-reported" and set(request_value) == callback and valid_identity
+            and isinstance(request_value["deliveryId"], str)
+            and isinstance(request_value["attemptId"], str)
+            and isinstance(request_value["receiptToken"], str)):
+        store.record_claude_client_reported(
+            request_value["runtimeId"], request_value["conversationId"],
+            request_value["deliveryId"], request_value["attemptId"], request_value["receiptToken"],
+        )
+        return {"recorded": True}
+    return {"reason": "unsupported_command"}
+
+
+def _stock_recovery_control_command(store, request_value):
     if request_value == {"command": "stock-recovery-list"}:
         return store.list_stock_recovery()
     if (isinstance(request_value, dict)
@@ -62,6 +91,10 @@ def _execute_control_command(store, request_value, dispatch=None):
             request_value["deliveryId"], request_value["attemptId"],
             request_value["expectedIdentitySha256"],
         )}
+    return None
+
+
+def _attachment_read_control_command(store, request_value):
     if (isinstance(request_value, dict)
             and set(request_value) == {"command", "runtimeId"}
             and request_value["command"] == "get-attachment"
@@ -72,14 +105,14 @@ def _execute_control_command(store, request_value, dispatch=None):
             and request_value["command"] == "get-stock-reassignment-source"
             and _uuid(request_value["runtimeId"])):
         return {"mapping": store.get_stock_reassignment_source(request_value["runtimeId"])}
-    if (
-        isinstance(request_value, dict)
-        and set(request_value) == {"command", "runtimeId"}
-        and request_value["command"] == "detach"
-        and isinstance(request_value["runtimeId"], str)
-    ):
+    if (isinstance(request_value, dict) and set(request_value) == {"command", "runtimeId"}
+            and request_value["command"] == "detach" and isinstance(request_value["runtimeId"], str)):
         store.detach(request_value["runtimeId"])
         return {"detached": True}
+    return None
+
+
+def _attachment_write_control_command(store, request_value):
     if (isinstance(request_value, dict)
             and set(request_value) == {"command", "mapping"}
             and request_value["command"] == "put-attachment"):
@@ -120,6 +153,24 @@ def _execute_control_command(store, request_value, dispatch=None):
         return store.revoke_transfer_source(
             request_value["mapping"], transfer=request_value["transfer"],
         )
+    return None
+
+
+def _execute_control_command(store, request_value, dispatch=None):
+    if request_value == {"command": "status"}:
+        return status(store, dispatch)
+    result = _claude_control_command(store, request_value)
+    if result is not None:
+        return result
+    result = _stock_recovery_control_command(store, request_value)
+    if result is not None:
+        return result
+    result = _attachment_read_control_command(store, request_value)
+    if result is not None:
+        return result
+    result = _attachment_write_control_command(store, request_value)
+    if result is not None:
+        return result
     return {"reason": "unsupported_command"}
 
 
@@ -226,7 +277,7 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
         profile = mapping["runtimeProfile"]
         request = {
             "operation": "renew", "runtimeId": mapping["runtimeId"],
-            "conversationId": profile["conversationId"],
+            "conversationId": profile["conversationId"], "client": profile["client"],
             "expectedRuntimeGeneration": mapping["runtimeGeneration"],
             "expectedAttachmentGeneration": mapping["attachmentGeneration"],
         }
@@ -284,6 +335,7 @@ def _watch_request(mapping, operation, *, after_subject=None, watch=None):
     request = {
         "operation": operation, "runtimeId": mapping["runtimeId"],
         "conversationId": profile["conversationId"],
+        "client": profile.get("client", "codex"),
         "expectedRuntimeGeneration": mapping["runtimeGeneration"],
         "expectedAttachmentGeneration": mapping["attachmentGeneration"],
     }
@@ -381,6 +433,8 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
         request = pending["request"]
         if (request.get("runtimeId") != runtime
                 or request.get("conversationId") != mapping["runtimeProfile"].get("conversationId")
+                or request.get("client", "codex")
+                != mapping["runtimeProfile"].get("client", "codex")
                 or request.get("expectedRuntimeGeneration") != mapping["runtimeGeneration"]
                 or request.get("expectedAttachmentGeneration") != mapping["attachmentGeneration"]):
             store.fail_stock_watch_request(runtime, row["watch"]["subject"],
@@ -563,121 +617,162 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                     store.remember_stock_watch(mapping, watch)
                 except StoreError:
                     pass
+def _retry_pending_stock_renewal(store, item, loop):
+    """Retry a cloud-committed renewal against the current local mapping."""
+    if item["leaseExpiresAt"] <= store.clock():
+        return "remove", None
+    try:
+        current = store.get_attachment(item["mapping"]["runtimeId"])
+    except sqlite3.Error:
+        delay = item["retryDelay"]
+        item["retryAt"] = loop.time() + delay
+        item["retryDelay"] = min(delay * 2, STOCK_RENEW_RETRY_MAX)
+        return "keep", None
+    if current != item["mapping"]:
+        return "remove", None
+    if item["retryAt"] > loop.time():
+        return "keep", None
+    try:
+        renewed = store.renew_stock_attachment(item["mapping"], item["leaseExpiresAt"])
+    except StoreError as error:
+        if error.code not in ("capacity", "storage_unavailable"):
+            raise
+        renewed = None
+    if renewed is None:
+        delay = item["retryDelay"]
+        item["retryAt"] = loop.time() + delay
+        item["retryDelay"] = min(delay * 2, STOCK_RENEW_RETRY_MAX)
+        return "keep", None
+    if not renewed:
+        return "suspend", None
+    if hasattr(store, "stock_watch_rows"):
+        return "renewed", store.get_attachment(item["mapping"]["runtimeId"])
+    return "renewed", None
+
+
+def _recover_pending_stock_renewals(store, pending, suspended, loop):
+    """Apply locally pending cloud renewals and return renewed IDs and watch rows."""
+    persisted_runtime_ids, watch_candidates = set(), {}
+    for fingerprint, item in list(pending.items()):
+        outcome, current = _retry_pending_stock_renewal(store, item, loop)
+        if outcome in ("remove", "suspend", "renewed"):
+            del pending[fingerprint]
+        if outcome == "suspend":
+            suspended.add(fingerprint)
+        elif outcome == "renewed":
+            persisted_runtime_ids.add(item["mapping"]["runtimeId"])
+            if current is not None:
+                watch_candidates[current["runtimeId"]] = current
+    return persisted_runtime_ids, watch_candidates
+
+
+def _eligible_stock_renewals(attachments, cloud, suspended, pending, persisted_runtime_ids,
+                             stock_codex_enabled):
+    """Select exact eligible client mappings without duplicating local renewals."""
+    suspended.intersection_update(
+        json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+        for mapping in attachments
+        if isinstance(mapping.get("runtimeProfile"), dict)
+        and mapping["runtimeProfile"].get("profile") == "assigned_stock_client"
+    )
+    pending_runtime_ids = {item["mapping"]["runtimeId"] for item in pending.values()}
+    renewals = []
+    for mapping in attachments:
+        profile = mapping.get("runtimeProfile")
+        if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
+            continue
+        if profile.get("client") == "codex" and not stock_codex_enabled:
+            continue
+        if any(mapping.get(key) != getattr(cloud, client_key) for key, client_key in (
+                ("principal", "principal"), ("agent", "agent"),
+                ("nodeId", "node_id"), ("nodeGeneration", "node_generation"))):
+            continue
+        fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+        if (fingerprint not in suspended
+                and mapping["runtimeId"] not in pending_runtime_ids
+                and mapping["runtimeId"] not in persisted_runtime_ids):
+            renewals.append(mapping)
+    available_slots = max(0, STOCK_RENEW_PENDING_LIMIT - len(pending))
+    return renewals[:min(STOCK_RENEW_BATCH_LIMIT, available_slots)]
+
+
+async def _request_stock_renewals(store, cloud, stop, renewals, suspended, pending,
+                                  watch_candidates, loop):
+    """Renew selected mappings and retain only cloud-success/local-pending replies."""
+    async with asyncio.TaskGroup() as tasks:
+        task_mappings = [
+            (mapping, tasks.create_task(
+                _renew_stock_mapping(store, cloud, stop, mapping, suspended)))
+            for mapping in renewals
+        ]
+    for mapping, task in task_mappings:
+        lease_expires_at = task.result()
+        if lease_expires_at is True:
+            if hasattr(store, "stock_watch_rows"):
+                current = store.get_attachment(mapping["runtimeId"])
+                if current is not None:
+                    watch_candidates[current["runtimeId"]] = current
+        elif lease_expires_at is not None:
+            fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+            pending[fingerprint] = {
+                "mapping": mapping,
+                "leaseExpiresAt": lease_expires_at,
+                "retryAt": loop.time() + STOCK_RENEW_RETRY_INITIAL,
+                "retryDelay": min(STOCK_RENEW_RETRY_INITIAL * 2, STOCK_RENEW_RETRY_MAX),
+            }
+
+
+async def _publish_stock_watch_candidates(store, cloud, stop, watch_candidates, watch_ready):
+    """Schedule or renew watches only for current locally renewed mappings."""
+    for current in watch_candidates.values():
+        if stop.is_set():
+            continue
+        if watch_ready is not None:
+            ready, event = watch_ready
+            ready[current["runtimeId"]] = current
+            event.set()
+            continue
+        try:
+            await _renew_stock_watches(store, cloud, stop, current)
+        except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
+            # Watch renewal status is isolated from the runtime renewal loop.
+            pass
+
+
+def _stock_renewal_wait(stop, loop, next_cloud_poll, pending):
+    wait_for = max(0.001, next_cloud_poll - loop.time())
+    if pending:
+        wait_for = min(wait_for, min(
+            max(0.001, item["retryAt"] - loop.time())
+            for item in pending.values()))
+    return asyncio.wait_for(stop.wait(), wait_for)
+
+
 # Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
-async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: MC0001
+async def _stock_renewal_worker(
+        store, cloud, stop, watch_ready=None, *, stock_codex_enabled=True):
     """Renew only live assigned-stock mappings already present in the local ledger."""
-    suspended = set()
-    pending = {}
+    suspended, pending = set(), {}
     loop = asyncio.get_running_loop()
     next_cloud_poll = loop.time()
     while not stop.is_set():
-        persisted_runtime_ids = set()
-        watch_candidates = {}
-        now = store.clock()
-        for fingerprint, item in list(pending.items()):
-            if item["leaseExpiresAt"] <= now:
-                del pending[fingerprint]
-                continue
-            try:
-                current = store.get_attachment(item["mapping"]["runtimeId"])
-            except sqlite3.Error:
-                delay = item["retryDelay"]
-                item["retryAt"] = loop.time() + delay
-                item["retryDelay"] = min(delay * 2, STOCK_RENEW_RETRY_MAX)
-                continue
-            if current != item["mapping"]:
-                del pending[fingerprint]
-                continue
-            if item["retryAt"] > loop.time():
-                continue
-            try:
-                renewed = store.renew_stock_attachment(
-                    item["mapping"], item["leaseExpiresAt"])
-            except StoreError as error:
-                if error.code not in ("capacity", "storage_unavailable"):
-                    raise
-                delay = item["retryDelay"]
-                item["retryAt"] = loop.time() + delay
-                item["retryDelay"] = min(delay * 2, STOCK_RENEW_RETRY_MAX)
-                continue
-            del pending[fingerprint]
-            if renewed:
-                persisted_runtime_ids.add(item["mapping"]["runtimeId"])
-                if hasattr(store, "stock_watch_rows"):
-                    current = store.get_attachment(item["mapping"]["runtimeId"])
-                    if current is not None:
-                        watch_candidates[current["runtimeId"]] = current
-            else:
-                suspended.add(fingerprint)
-
+        persisted_runtime_ids, watch_candidates = _recover_pending_stock_renewals(
+            store, pending, suspended, loop,
+        )
         if loop.time() >= next_cloud_poll:
-            attachments = store.list_attachments()
-            suspended.intersection_update(
-                json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-                for mapping in attachments
-                if isinstance(mapping.get("runtimeProfile"), dict)
-                and mapping["runtimeProfile"].get("profile") == "assigned_stock_client"
+            renewals = _eligible_stock_renewals(
+                store.list_attachments(), cloud, suspended, pending,
+                persisted_runtime_ids, stock_codex_enabled,
             )
-            renewals = []
-            pending_runtime_ids = {
-                item["mapping"]["runtimeId"] for item in pending.values()
-            }
-            for mapping in attachments:
-                profile = mapping.get("runtimeProfile")
-                if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
-                    continue
-                if any(mapping.get(key) != getattr(cloud, client_key) for key, client_key in (
-                        ("principal", "principal"), ("agent", "agent"),
-                        ("nodeId", "node_id"), ("nodeGeneration", "node_generation"))):
-                    continue
-                fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-                if (fingerprint not in suspended
-                        and mapping["runtimeId"] not in pending_runtime_ids
-                        and mapping["runtimeId"] not in persisted_runtime_ids):
-                    renewals.append(mapping)
-            available_slots = max(0, STOCK_RENEW_PENDING_LIMIT - len(pending))
-            renewals = renewals[:min(STOCK_RENEW_BATCH_LIMIT, available_slots)]
-            async with asyncio.TaskGroup() as tasks:
-                task_mappings = [
-                    (mapping, tasks.create_task(
-                        _renew_stock_mapping(store, cloud, stop, mapping, suspended)))
-                    for mapping in renewals
-                ]
-            for mapping, task in task_mappings:
-                lease_expires_at = task.result()
-                if lease_expires_at is True:
-                    if hasattr(store, "stock_watch_rows"):
-                        current = store.get_attachment(mapping["runtimeId"])
-                        if current is not None:
-                            watch_candidates[current["runtimeId"]] = current
-                elif lease_expires_at is not None:
-                    fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
-                    pending[fingerprint] = {
-                        "mapping": mapping,
-                        "leaseExpiresAt": lease_expires_at,
-                        "retryAt": loop.time() + STOCK_RENEW_RETRY_INITIAL,
-                        "retryDelay": min(STOCK_RENEW_RETRY_INITIAL * 2, STOCK_RENEW_RETRY_MAX),
-                    }
+            await _request_stock_renewals(
+                store, cloud, stop, renewals, suspended, pending, watch_candidates, loop,
+            )
             next_cloud_poll = loop.time() + STOCK_RENEW_INTERVAL
-        for current in watch_candidates.values():
-            if not stop.is_set():
-                if watch_ready is None:
-                    try:
-                        await _renew_stock_watches(store, cloud, stop, current)
-                    except (CloudError, StoreError, sqlite3.Error, TimeoutError, ValueError):
-                        # Watch renewal status is isolated from the runtime renewal loop.
-                        pass
-                else:
-                    ready, event = watch_ready
-                    ready[current["runtimeId"]] = current
-                    event.set()
-        wait_for = max(0.001, next_cloud_poll - loop.time())
-        if pending:
-            wait_for = min(wait_for, min(
-                max(0.001, item["retryAt"] - loop.time())
-                for item in pending.values()))
+        await _publish_stock_watch_candidates(
+            store, cloud, stop, watch_candidates, watch_ready,
+        )
         try:
-            await asyncio.wait_for(stop.wait(), wait_for)
+            await _stock_renewal_wait(stop, loop, next_cloud_poll, pending)
         except TimeoutError:
             pass
 
@@ -773,7 +868,7 @@ def _control_handler(store, dispatch):
 
 async def serve(state_dir, *, dispatch_config=None, stock_only=False):
     configured = load_dispatch_config(dispatch_config, state_dir) if dispatch_config is not None else None
-    if stock_only and (configured is None or not configured[0].get("stockCodexBinary")):
+    if stock_only and configured is None:
         raise SecurityError("stock_profile_requires_stock_client")
     with Store(state_dir) as store:
         path = Path(state_dir) / "control.sock"
@@ -813,7 +908,7 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
                 await listener.start(config["listenHost"], config["listenPort"])
                 worker = asyncio.create_task(_dispatch_worker(gateway, stop))
                 worker.add_done_callback(lambda _task: _stop_dispatch(dispatch, listener, stop))
-                if config.get("stockCodexBinary"):
+                if stock_only or config.get("stockCodexBinary"):
                     watch_ready, watch_event = {}, asyncio.Event()
                     stock_watch_worker = asyncio.create_task(
                         _stock_watch_worker(store, cloud, stop, watch_ready, watch_event),
@@ -823,6 +918,7 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
                     )
                     stock_worker = asyncio.create_task(_stock_renewal_worker(
                         store, cloud, stop, (watch_ready, watch_event),
+                        stock_codex_enabled=bool(config.get("stockCodexBinary")),
                     ))
                     stock_worker.add_done_callback(
                         lambda _task: _stop_dispatch(dispatch, listener, stop),

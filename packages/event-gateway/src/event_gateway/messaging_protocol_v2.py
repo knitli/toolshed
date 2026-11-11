@@ -123,7 +123,8 @@ def _attempt(value: dict) -> bool:
 
 def _runtime_profile(value: object) -> bool:
     return (_exact(value, ('profile', 'client', 'conversationId'))
-            and value['profile'] == 'assigned_stock_client' and value['client'] == 'codex'
+            and value['profile'] == 'assigned_stock_client'
+            and value['client'] in ('codex', 'claude')
             and _matches(_UUID, value['conversationId']))
 
 
@@ -177,7 +178,8 @@ def _ack_shape(value: object) -> bool:
 def _stock_ack_shape(value: object) -> bool:
     return (_exact(value, _STOCK_ACK_FIELDS) and _attempt(value)
             and _matches(_UUID, value['permitId']) and _runtime_profile(value['runtimeProfile'])
-            and value['status'] == 'command_accepted'
+            and value['status'] == ('command_accepted' if value['runtimeProfile']['client'] == 'codex'
+                                    else 'client_reported')
             and _matches(re.compile(r'msg:[a-f0-9]{64}'), value['deliveredSourceStateVersion'])
             and _timestamp(value['acknowledgedAt']) is not None)
 
@@ -264,4 +266,7 @@ def acknowledgment_matches_delivery(envelope: object, acknowledgment: object) ->
     shape = _stock_ack_shape(acknowledgment) if stock else _ack_shape(acknowledgment)
     return (shape and all(acknowledgment[key] == envelope[key] for key in _ATTEMPT_FIELDS)
             and acknowledgment['deliveredSourceStateVersion'] == envelope['sourceStateVersion']
-            and (not stock or acknowledgment['runtimeProfile'] == envelope['runtimeProfile']))
+            and (not stock or acknowledgment['runtimeProfile'] == envelope['runtimeProfile'])
+            and (not stock or acknowledgment['status'] == (
+                'command_accepted' if envelope['runtimeProfile']['client'] == 'codex'
+                else 'client_reported')))
