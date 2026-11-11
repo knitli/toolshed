@@ -124,6 +124,32 @@ class ClaudeChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("permitId", ack)
         self.assertEqual(self.store.current_attempt(delivery_id)["ack_state"], "client_reported")
 
+    async def test_claude_poll_skips_other_runtime_handoff_before_decoding(self):
+        delivery_id = await self.admit_and_claim()
+        other_delivery_id, other_attempt_id = str(uuid.uuid4()), str(uuid.uuid4())
+        with self.store.db:
+            self.store.db.execute(
+                "INSERT INTO deliveries(id,dedup,semantic,envelope,runtime,agent,state,created,updated,retain_until) "
+                "VALUES(?,?,?,?,?,?,'admitted',?,?,?)",
+                (other_delivery_id, str(uuid.uuid4()), "{}", "{}", "other-runtime", "other-agent",
+                 self.now, self.now - 1, self.now + 3600),
+            )
+            self.store.db.execute(
+                "INSERT INTO attempts(delivery_id,attempt_id,state,envelope,reserved_bytes,updated,claude_handoff) "
+                "VALUES(?,?,'admitted','{}',0,?,'{')",
+                (other_delivery_id, other_attempt_id, self.now - 1),
+            )
+
+        claimed = self.store.claim_claude_handoff(
+            self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
+        )["delivery"]
+        self.assertEqual(claimed["deliveryId"], delivery_id)
+        other_state = self.store.db.execute(
+            "SELECT state FROM attempts WHERE delivery_id=? AND attempt_id=?",
+            (other_delivery_id, other_attempt_id),
+        ).fetchone()["state"]
+        self.assertEqual(other_state, "admitted")
+
     async def test_v2_claude_receipt_keeps_permit_and_retries_cloud_ack(self):
         self.install_v2()
         self.gateway.stock_only = True

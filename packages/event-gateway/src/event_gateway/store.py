@@ -219,6 +219,9 @@ class Store:
             self.db.execute(
                 "CREATE INDEX IF NOT EXISTS delivery_state ON deliveries(state)"
             )
+            self.db.execute(
+                "CREATE INDEX IF NOT EXISTS delivery_runtime_state ON deliveries(runtime,state)"
+            )
             self.db.execute("""CREATE TABLE IF NOT EXISTS stock_watches (
                 runtime TEXT NOT NULL, subject TEXT NOT NULL, incarnation INTEGER NOT NULL,
                 data TEXT NOT NULL, updated REAL NOT NULL,
@@ -1637,7 +1640,8 @@ class Store:
         candidates = self.db.execute(
             "SELECT a.*,d.state AS delivery_state FROM attempts a JOIN deliveries d ON d.id=a.delivery_id "
             "WHERE a.state='admitted' AND a.claude_handoff IS NOT NULL AND a.claude_receipt_hash IS NULL "
-            "AND d.state='admitted' ORDER BY a.updated,a.delivery_id"
+            "AND d.state='admitted' AND d.runtime=? ORDER BY a.updated,a.delivery_id",
+            (runtime_id,),
         ).fetchall()
         for candidate in candidates:
             handoff = json.loads(candidate["claude_handoff"])
