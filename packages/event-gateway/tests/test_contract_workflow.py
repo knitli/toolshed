@@ -60,7 +60,9 @@ CLAUDE_V2_SOURCE_HASHES = {
     "apps/os/packages/event-runtime/src/messaging/protocol-v2.ts": "44068f5f4717ac84401e10dcd90cbc6875d32bdf3d513235ba6fb02c4e942a07",
     "apps/os/packages/event-runtime/src/protocol.ts": "6cc08bcc9971d0c502bde662c964061d8dc006e25c4acc29ee14385ad274beb7",
     "apps/os/packages/event-runtime/src/policy.ts": "2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3",
-    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": CLAUDE_V2_HASHES["messaging-v2/messaging-protocol-semantics-v2.json"],
+    "apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json": CLAUDE_V2_HASHES[
+        "messaging-v2/messaging-protocol-semantics-v2.json"
+    ],
     "apps/os/packages/event-runtime/__tests__/fixtures/messaging-v2-wire.json": CLAUDE_V2_HASHES["messaging-v2/messaging-v2-wire.json"],
     "apps/os/pnpm-lock.yaml": "62f84801e3d426df4a97a54bc48c1a547d9ae3f0205166cc92d9b7391e581549",
 }
