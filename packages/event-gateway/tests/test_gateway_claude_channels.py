@@ -27,6 +27,7 @@ V2 = json.loads((ROOT / "contracts/messaging-v2/messaging-protocol-semantics-v2.
 
 class Authority:
     def __init__(self, now):
+        """Fake the cloud authority for isolated gateway tests."""
         self.now = now
         self.acks = []
         self.fail_ack = False
@@ -157,9 +158,13 @@ class ClaudeChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_lost_poll_reply_and_bad_callback_never_replay_or_settle(self):
         self.install_v2()
         delivery_id = await self.admit_and_claim()
-        self.store.claim_claude_handoff(
+        first = self.store.claim_claude_handoff(
             self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
         )["delivery"]
+        self.assertIsNotNone(first)
+        self.assertIsNone(self.store.claim_claude_handoff(
+            self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
+        )["delivery"])
         with self.assertRaises(StoreError):
             self.store.record_claude_client_reported(
                 self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
@@ -172,6 +177,29 @@ class ClaudeChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.store.claim_claude_handoff(
             self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
         )["delivery"])
+        self.assertEqual(self.store.current_attempt(delivery_id)["state"], "claude_claimed")
+        self.assertEqual(self.authority.acks, [])
+
+    async def test_callback_rejects_routed_message_id_drift(self):
+        self.install_v2()
+        delivery_id = await self.admit_and_claim()
+        payload = self.store.claim_claude_handoff(
+            self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
+        )["delivery"]
+        handoff = self.store.current_attempt(delivery_id)["claude_handoff"]
+        self.assertEqual(handoff["messageId"], self.event["canonicalSubject"]["messageId"])
+        handoff["messageId"] = str(uuid.uuid4())
+        with self.store.db:
+            self.store.db.execute(
+                "UPDATE attempts SET claude_handoff=? WHERE delivery_id=? AND attempt_id=?",
+                (json.dumps(handoff, sort_keys=True, separators=(",", ":")),
+                 delivery_id, self.event["attemptId"]),
+            )
+        with self.assertRaisesRegex(StoreError, "^stale_claude_receipt$"):
+            self.store.record_claude_client_reported(
+                self.event["runtimeId"], self.event["runtimeProfile"]["conversationId"],
+                delivery_id, self.event["attemptId"], payload["receiptToken"],
+            )
         self.assertEqual(self.store.current_attempt(delivery_id)["state"], "claude_claimed")
         self.assertEqual(self.authority.acks, [])
 
@@ -206,6 +234,7 @@ class ClaudeChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
             "command": "claude-poll", "runtimeId": self.event["runtimeId"],
             "conversationId": self.event["runtimeProfile"]["conversationId"],
         })["delivery"]
+        self.assertEqual(claimed["messageId"], self.event["canonicalSubject"]["messageId"])
         callback = daemon._execute_control_command(self.store, {
             "command": "claude-client-reported", "runtimeId": self.event["runtimeId"],
             "conversationId": self.event["runtimeProfile"]["conversationId"],
@@ -308,6 +337,7 @@ class ClaudeChannelGatewayTests(unittest.IsolatedAsyncioTestCase):
                 body = json.loads(notification["params"]["content"])
                 self.assertEqual(body["event"], self.event["eventReference"])
                 self.assertEqual(body["deliveryId"], delivery_id)
+                self.assertEqual(body["messageId"], self.event["canonicalSubject"]["messageId"])
                 await send_frame({
                     "jsonrpc": "2.0", "id": 3, "method": "tools/call",
                     "params": {"name": "client_reported", "arguments": {

@@ -47,6 +47,64 @@ def _assigned_stock_v2(envelope):
             and profile.get("profile") == "assigned_stock_client")
 
 
+def _claude_expected_handoff(envelope, admission):
+    expected = {key: envelope[key] for key in (
+        "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+        "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+        "routingGeneration", "namespace", "agentIncarnation", "sourceStateVersion",
+        "eventReference", "runtimeProfile",
+    ) if key in envelope}
+    if isinstance(admission, dict):
+        expected.update(nodeId=admission.get("nodeId"),
+                        conversationId=envelope.get("runtimeProfile", {}).get("conversationId"))
+    if "routingGeneration" in envelope:
+        subject = envelope["canonicalSubject"]
+        expected.update(namespace=subject["namespace"], agentIncarnation=subject["agentIncarnation"],
+                        messageId=subject["messageId"])
+    return expected
+
+
+def _claude_client_reported_acknowledgment(envelope, admission, now, now_ms):
+    timestamp = datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    acknowledgment = {
+        **{key: envelope[key] for key in (
+            "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+            "nodeGeneration", "runtimeGeneration", "attachmentGeneration",
+        )},
+        "deliveredSourceStateVersion": envelope["sourceStateVersion"],
+        "acknowledgedAt": timestamp,
+        "status": "client_reported",
+        "runtimeProfile": envelope["runtimeProfile"],
+    }
+    if envelope.get("schemaVersion") == 2:
+        acknowledgment.update(schemaVersion=2, nodeId=envelope["nodeId"],
+                              permitId=admission["permitId"])
+    else:
+        acknowledgment["schemaVersion"] = 1
+    for key in ("consumerGeneration", "routingGeneration"):
+        if key in envelope:
+            acknowledgment[key] = envelope[key]
+    try:
+        if envelope.get("schemaVersion") == 2:
+            from . import messaging_protocol_v2 as messaging
+            normalized = messaging.parse_acknowledgment(
+                _json(acknowledgment), now_ms=now_ms,
+            )
+            valid = (messaging.acknowledgment_matches_delivery(envelope, normalized)
+                     and normalized["status"] == "client_reported"
+                     and normalized["permitId"] == admission["permitId"])
+        else:
+            from .protocol import acknowledgment_matches_delivery, parse_acknowledgment
+            normalized = parse_acknowledgment(_json(acknowledgment), now_ms=now_ms)
+            valid = (acknowledgment_matches_delivery(envelope, normalized)
+                     and normalized["status"] == "client_reported")
+    except (ValueError, TypeError, KeyError):
+        valid = False
+    if not valid:
+        raise StoreError("invalid_acknowledgment")
+    return normalized
+
+
 def validate_native_route(mapping, *, allow_legacy=False):
     """Validate an exact launcher route; live adapter factories cannot omit it."""
     from .cloud import CloudError, _native_binding, _uuid
@@ -1149,18 +1207,20 @@ class Store:
                 not isinstance(delivery_id, str)
                 or not re.fullmatch(r"dly_[a-f0-9]{64}", delivery_id)):
             raise StoreError("invalid_delivery_id")
-        params = ["ambiguous", "ambiguous", "assigned_stock_client"]
+        params = ["ambiguous", "ambiguous", "claude_claimed", "claude", "assigned_stock_client"]
         if delivery_id is None:
             query = (
                 "SELECT a.* FROM deliveries d JOIN attempts a ON a.delivery_id=d.id "
-                "WHERE d.state=? AND a.state=? "
+                "WHERE d.state=? AND (a.state=? OR (a.state=? "
+                "AND json_extract(a.envelope,'$.runtimeProfile.client')=?)) "
                 "AND json_extract(a.envelope,'$.runtimeProfile.profile')=? "
                 "ORDER BY d.updated,d.id LIMIT ?"
             )
         else:
             query = (
                 "SELECT a.* FROM deliveries d JOIN attempts a ON a.delivery_id=d.id "
-                "WHERE d.state=? AND a.state=? "
+                "WHERE d.state=? AND (a.state=? OR (a.state=? "
+                "AND json_extract(a.envelope,'$.runtimeProfile.client')=?)) "
                 "AND json_extract(a.envelope,'$.runtimeProfile.profile')=? AND d.id=? "
                 "ORDER BY d.updated,d.id LIMIT ?"
             )
@@ -1217,7 +1277,11 @@ class Store:
             _, digest = identity
             if digest != expected_identity_sha256:
                 raise StoreError("stale_recovery_identity")
-            if delivery["state"] != "ambiguous" or attempt["state"] != "ambiguous":
+            claude_claimed = (
+                attempt["state"] == "claude_claimed"
+                and envelope.get("runtimeProfile", {}).get("client") == "claude"
+            )
+            if delivery["state"] != "ambiguous" or (attempt["state"] != "ambiguous" and not claude_claimed):
                 raise StoreError("not_ambiguous")
             record = {
                 "action": "abandoned", "identitySha256": digest,
@@ -1552,7 +1616,8 @@ class Store:
             }
             handoff.update(nodeId=mapping["nodeId"], conversationId=profile["conversationId"])
             if "routingGeneration" in envelope:
-                handoff.update(namespace=mapping["namespace"], agentIncarnation=mapping["agentIncarnation"])
+                handoff.update(namespace=mapping["namespace"], agentIncarnation=mapping["agentIncarnation"],
+                               messageId=envelope["canonicalSubject"]["messageId"])
             encoded = _json(handoff)
             if row["claude_handoff"] is not None:
                 if row["claude_handoff"] != encoded:
@@ -1643,20 +1708,7 @@ class Store:
             if (not isinstance(envelope.get("runtimeProfile"), dict)
                     or envelope["runtimeProfile"].get("client") != "claude"):
                 raise StoreError("stale_claude_receipt")
-            expected_handoff = {key: envelope[key] for key in (
-                "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
-                "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
-                "routingGeneration", "namespace", "agentIncarnation", "sourceStateVersion",
-                "eventReference", "runtimeProfile",
-            ) if key in envelope}
-            if isinstance(admission, dict):
-                expected_handoff.update(nodeId=admission.get("nodeId"),
-                                        conversationId=envelope.get("runtimeProfile", {}).get("conversationId"))
-            if "routingGeneration" in envelope:
-                expected_handoff.update(
-                    namespace=envelope["canonicalSubject"]["namespace"],
-                    agentIncarnation=envelope["canonicalSubject"]["agentIncarnation"],
-                )
+            expected_handoff = _claude_expected_handoff(envelope, admission)
             if (not isinstance(admission, dict) or admission.get("envelope") != envelope
                     or handoff != expected_handoff):
                 raise StoreError("stale_claude_receipt")
@@ -1669,44 +1721,9 @@ class Store:
                         "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
                         "runtimeProfile", *MESSAGING_METADATA))):
                 raise StoreError("stale_claude_receipt")
-            timestamp = datetime.fromtimestamp(self.clock(), timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-            acknowledgment = {
-                **{key: envelope[key] for key in (
-                    "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
-                    "nodeGeneration", "runtimeGeneration", "attachmentGeneration",
-                )},
-                "deliveredSourceStateVersion": envelope["sourceStateVersion"],
-                "acknowledgedAt": timestamp,
-                "status": "client_reported",
-                "runtimeProfile": envelope["runtimeProfile"],
-            }
-            if envelope.get("schemaVersion") == 2:
-                acknowledgment.update(schemaVersion=2, nodeId=envelope["nodeId"],
-                                      permitId=admission["permitId"])
-            else:
-                acknowledgment["schemaVersion"] = 1
-            for key in ("consumerGeneration", "routingGeneration"):
-                if key in envelope:
-                    acknowledgment[key] = envelope[key]
-            try:
-                if envelope.get("schemaVersion") == 2:
-                    from . import messaging_protocol_v2 as messaging
-                    normalized = messaging.parse_acknowledgment(
-                        _json(acknowledgment), now_ms=self.clock() * 1000,
-                    )
-                    valid = (messaging.acknowledgment_matches_delivery(envelope, normalized)
-                             and normalized["status"] == "client_reported"
-                             and normalized["permitId"] == admission["permitId"])
-                else:
-                    from .protocol import acknowledgment_matches_delivery, parse_acknowledgment
-                    normalized = parse_acknowledgment(_json(acknowledgment), now_ms=self.clock() * 1000)
-                    valid = (acknowledgment_matches_delivery(envelope, normalized)
-                             and normalized["status"] == "client_reported")
-            except (ValueError, TypeError, KeyError):
-                valid = False
-            if not valid:
-                raise StoreError("invalid_acknowledgment")
-            acknowledgment = normalized
+            acknowledgment = _claude_client_reported_acknowledgment(
+                envelope, admission, self.clock(), self.clock() * 1000,
+            )
             self._spend(row, len(_json(acknowledgment).encode()))
             self.db.execute(
                 "UPDATE attempts SET state='client_reported',native_ack=?,reason=NULL,updated=? "
@@ -2271,7 +2288,7 @@ class Store:
             self._public(row)
             for row in self.db.execute(
                 "SELECT * FROM deliveries WHERE (state IN "
-                "('claiming','admitted','settlement_pending','submitted','ambiguous','client_reported') "
+                "('claiming','admitted','settlement_pending','submitted','ambiguous') "
                 "OR (state='observed' AND ack_state IS NOT state) "
                 "OR (state='command_accepted' AND ack_state IS NOT state) "
                 "OR (state='client_reported' AND ack_state IS NOT state)) "

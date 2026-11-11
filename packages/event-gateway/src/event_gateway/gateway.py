@@ -501,6 +501,8 @@ class Gateway:
             return self._row(delivery_id)
 
         if profile["client"] == "claude":
+            if _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000:
+                return await self._retire_local(delivery_id, "admission_expired")
             try:
                 self.store.begin_claude_handoff(delivery_id, envelope["attemptId"])
             except StoreError:
@@ -630,6 +632,8 @@ class Gateway:
             async with self._runtime_guard(envelope["runtimeId"]):
                 attempt = self.store.current_attempt(delivery_id)
                 if envelope["runtimeProfile"].get("client") == "claude":
+                    if attempt and attempt["state"] == "settlement_pending":
+                        return await self._settle(delivery_id)
                     if attempt and attempt["state"] == "client_reported" and attempt.get("native_ack"):
                         return await self._send_claude_acknowledgment(delivery_id, attempt)
                     if attempt and attempt["state"] in ("claude_claimed", "ambiguous"):

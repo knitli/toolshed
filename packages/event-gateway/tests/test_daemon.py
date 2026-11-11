@@ -60,6 +60,45 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                 await daemon.serve(Path(directory), stock_only=True)
             load_config.assert_not_called()
 
+    async def test_claude_control_handler_runs_only_for_exact_rpc_shapes(self):
+        calls = []
+
+        class ClaudeStore:
+            def register_claude_channel(self, runtime_id, conversation_id):
+                calls.append(("register", runtime_id, conversation_id))
+                return {"runtimeId": runtime_id}
+
+            def claim_claude_handoff(self, runtime_id, conversation_id):
+                calls.append(("poll", runtime_id, conversation_id))
+                return {"delivery": None}
+
+            def record_claude_client_reported(self, *arguments):
+                calls.append(("reported", *arguments))
+
+        store = ClaudeStore()
+        runtime_id, conversation_id = str(uuid.uuid4()), str(uuid.uuid4())
+        register = {"command": "claude-register", "runtimeId": runtime_id,
+                    "conversationId": conversation_id}
+        self.assertEqual(daemon._execute_control_command(store, register), {
+            "registered": True, "runtimeId": runtime_id,
+        })
+        self.assertEqual(daemon._execute_control_command(store, {
+            "command": "claude-poll", "runtimeId": runtime_id,
+            "conversationId": conversation_id,
+        }), {"delivery": None})
+        callback = {"command": "claude-client-reported", "runtimeId": runtime_id,
+                    "conversationId": conversation_id, "deliveryId": "delivery",
+                    "attemptId": "attempt", "receiptToken": "token"}
+        self.assertEqual(daemon._execute_control_command(store, callback), {"recorded": True})
+        self.assertEqual(daemon._execute_control_command(store, {**register, "extra": True}), {
+            "reason": "unsupported_command",
+        })
+        self.assertEqual(calls, [
+            ("register", runtime_id, conversation_id),
+            ("poll", runtime_id, conversation_id),
+            ("reported", runtime_id, conversation_id, "delivery", "attempt", "token"),
+        ])
+
     async def test_stock_recovery_controls_use_store_and_reject_extra_fields(self):
         calls = []
 

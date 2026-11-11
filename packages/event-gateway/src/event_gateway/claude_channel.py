@@ -30,7 +30,9 @@ _DELIVERY_FIELDS = {
     "sourceStateVersion", "eventReference", "runtimeProfile", "nodeId", "conversationId",
     "receiptToken",
 }
-_ROUTED_DELIVERY_FIELDS = _DELIVERY_FIELDS | {"routingGeneration", "namespace", "agentIncarnation"}
+_ROUTED_DELIVERY_FIELDS = _DELIVERY_FIELDS | {
+    "routingGeneration", "namespace", "agentIncarnation", "messageId",
+}
 _ID_RE = re.compile(r"dly_[0-9a-f]{64}\Z")
 _EVENT_REFERENCE_RE = re.compile(
     r"ref_[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
@@ -41,6 +43,20 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{32,256}\Z")
 
 def _text(value):
     return isinstance(value, str) and 0 < len(value) <= 512 and "\x00" not in value
+
+
+def _valid_route(value):
+    if "routingGeneration" not in value:
+        return True
+    namespace = value["namespace"]
+    return (
+        _generation(value["routingGeneration"])
+        and isinstance(namespace, str)
+        and 1 <= _code_points(namespace) <= 256
+        and not re.search(r"[\x00-\x1f\x7f]", namespace)
+        and _integer(value["agentIncarnation"], 0)
+        and _uuid(value["messageId"])
+    )
 
 
 def _delivery(value, runtime_id, conversation_id):
@@ -71,13 +87,8 @@ def _delivery(value, runtime_id, conversation_id):
     source_version = value["sourceStateVersion"]
     if not isinstance(source_version, str) or not _SOURCE_STATE_RE.fullmatch(source_version):
         return None
-    if "routingGeneration" in value:
-        namespace = value["namespace"]
-        if (not _generation(value["routingGeneration"])
-                or not isinstance(namespace, str) or not 1 <= _code_points(namespace) <= 256
-                or re.search(r"[\x00-\x1f\x7f]", namespace)
-                or not _integer(value["agentIncarnation"], 0)):
-            return None
+    if not _valid_route(value):
+        return None
     return value
 
 
@@ -101,6 +112,93 @@ def _tool():
     )
 
 
+async def _register(state_dir, runtime_id, conversation_id):
+    try:
+        result = await request(state_dir, {
+            "command": "claude-register", "runtimeId": runtime_id,
+            "conversationId": conversation_id,
+        })
+        return (isinstance(result, dict) and result.get("registered") is True
+                and result.get("runtimeId") == runtime_id)
+    except Exception:
+        return False
+
+
+async def _next_delivery(state_dir, runtime_id, conversation_id):
+    result = await request(state_dir, {
+        "command": "claude-poll", "runtimeId": runtime_id,
+        "conversationId": conversation_id,
+    })
+    if not isinstance(result, dict) or set(result) != {"delivery"}:
+        return None
+    return _delivery(result["delivery"], runtime_id, conversation_id)
+
+
+def _notification(delivery):
+    body = {
+        "event": delivery["eventReference"],
+        "deliveryId": delivery["deliveryId"],
+        "attemptId": delivery["attemptId"],
+        "receiptToken": delivery["receiptToken"],
+    }
+    if "routingGeneration" in delivery:
+        body["messageId"] = delivery["messageId"]
+    notice = types.Notification[dict[str, Any], str](
+        method="notifications/claude/channel",
+        params={
+            "content": json.dumps(body, ensure_ascii=False, separators=(",", ":")),
+            "meta": {
+                "delivery_id": delivery["deliveryId"],
+                "attempt_id": delivery["attemptId"],
+            },
+        },
+    )
+    return notice if len(notice.model_dump_json(exclude_none=True).encode("utf-8")) <= _MAX_CONTROL_FRAME else None
+
+
+async def _poll(state_dir, runtime_id, conversation_id, session):
+    while True:
+        try:
+            delivery = await _next_delivery(state_dir, runtime_id, conversation_id)
+            notice = _notification(delivery) if delivery is not None else None
+            if notice is None:
+                await asyncio.sleep(_POLL_INTERVAL)
+                continue
+            # A claimed event is one-shot even if writing this notification fails.
+            await session.send_notification(notice)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await asyncio.sleep(_POLL_INTERVAL)
+
+
+def _callback_result(recorded):
+    return [types.TextContent(type="text", text=json.dumps(
+        {"recorded": recorded, "reason": None if recorded else "refused"},
+        separators=(",", ":"),
+    ))]
+
+
+async def _client_reported(state_dir, runtime_id, conversation_id, arguments):
+    if not isinstance(arguments, dict):
+        return _callback_result(False)
+    if (set(arguments) != {"deliveryId", "attemptId", "receiptToken"}
+            or not isinstance(arguments.get("deliveryId"), str)
+            or not _ID_RE.fullmatch(arguments["deliveryId"])
+            or not _uuid(arguments.get("attemptId"))
+            or not isinstance(arguments.get("receiptToken"), str)
+            or not _TOKEN_RE.fullmatch(arguments["receiptToken"])):
+        return [types.TextContent(type="text", text='{"recorded":false,"reason":"invalid_arguments"}')]
+    try:
+        result = await request(state_dir, {
+            "command": "claude-client-reported", "runtimeId": runtime_id,
+            "conversationId": conversation_id, **arguments,
+        })
+    except Exception:
+        result = None
+    return _callback_result(isinstance(result, dict) and result.get("recorded") is True)
+
+
 def create_server(state_dir: Path, runtime_id: str, conversation_id: str):
     server = Server(
         "knitli-event-gateway", version="0.1.0",
@@ -112,65 +210,13 @@ def create_server(state_dir: Path, runtime_id: str, conversation_id: str):
     poll_task = None
     registered = False
 
-    async def poll(session):
-        while True:
-            try:
-                result = await request(state_dir, {
-                    "command": "claude-poll", "runtimeId": runtime_id,
-                    "conversationId": conversation_id,
-                })
-                if not isinstance(result, dict) or set(result) != {"delivery"}:
-                    await asyncio.sleep(_POLL_INTERVAL)
-                    continue
-                delivery = result["delivery"]
-                if delivery is None:
-                    await asyncio.sleep(_POLL_INTERVAL)
-                    continue
-                delivery = _delivery(delivery, runtime_id, conversation_id)
-                if delivery is None:
-                    await asyncio.sleep(_POLL_INTERVAL)
-                    continue
-                content = json.dumps({
-                    "event": delivery["eventReference"],
-                    "deliveryId": delivery["deliveryId"],
-                    "attemptId": delivery["attemptId"],
-                    "receiptToken": delivery["receiptToken"],
-                }, ensure_ascii=False, separators=(",", ":"))
-                notice = types.Notification[dict[str, Any], str](
-                    method="notifications/claude/channel",
-                    params={
-                        "content": content,
-                        "meta": {
-                            "delivery_id": delivery["deliveryId"],
-                            "attempt_id": delivery["attemptId"],
-                        },
-                    },
-                )
-                if len(notice.model_dump_json(exclude_none=True).encode("utf-8")) > _MAX_CONTROL_FRAME:
-                    await asyncio.sleep(_POLL_INTERVAL)
-                    continue
-                # A claimed event is one-shot even if writing this notification fails.
-                await session.send_notification(notice)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                await asyncio.sleep(_POLL_INTERVAL)
-
     async def register_and_poll(session):
         nonlocal registered
         while not registered:
-            try:
-                result = await request(state_dir, {
-                    "command": "claude-register", "runtimeId": runtime_id,
-                    "conversationId": conversation_id,
-                })
-                registered = (isinstance(result, dict) and result.get("registered") is True
-                              and result.get("runtimeId") == runtime_id)
-            except Exception:
-                registered = False
+            registered = await _register(state_dir, runtime_id, conversation_id)
             if not registered:
                 await asyncio.sleep(_POLL_INTERVAL)
-        await poll(session)
+        await _poll(state_dir, runtime_id, conversation_id, session)
 
     @server.list_tools()
     async def list_tools():
@@ -183,27 +229,9 @@ def create_server(state_dir: Path, runtime_id: str, conversation_id: str):
 
     @server.call_tool()
     async def call_tool(name, arguments):
-        if name != "client_reported" or not registered or not isinstance(arguments, dict):
-            return [types.TextContent(type="text", text='{"recorded":false,"reason":"refused"}')]
-        if (set(arguments) != {"deliveryId", "attemptId", "receiptToken"}
-                or not isinstance(arguments.get("deliveryId"), str)
-                or not _ID_RE.fullmatch(arguments["deliveryId"])
-                or not _uuid(arguments.get("attemptId"))
-                or not isinstance(arguments.get("receiptToken"), str)
-                or not _TOKEN_RE.fullmatch(arguments["receiptToken"])):
-            return [types.TextContent(type="text", text='{"recorded":false,"reason":"invalid_arguments"}')]
-        try:
-            result = await request(state_dir, {
-                "command": "claude-client-reported", "runtimeId": runtime_id,
-                "conversationId": conversation_id, **arguments,
-            })
-        except Exception:
-            result = None
-        recorded = isinstance(result, dict) and result.get("recorded") is True
-        return [types.TextContent(type="text", text=json.dumps(
-            {"recorded": recorded, "reason": None if recorded else "refused"},
-            separators=(",", ":"),
-        ))]
+        if name != "client_reported" or not registered:
+            return _callback_result(False)
+        return await _client_reported(state_dir, runtime_id, conversation_id, arguments)
 
     async def run():
         with _assignment_lock(state_dir, runtime_id, conversation_id):

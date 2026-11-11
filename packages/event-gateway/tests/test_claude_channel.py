@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import secrets
 import stat
 import sys
 import tempfile
@@ -13,18 +14,20 @@ RUNTIME_ID = "123e4567-e89b-42d3-a456-426614174000"
 CONVERSATION_ID = "123e4567-e89b-42d3-a456-426614174001"
 EVENT_ID = "123e4567-e89b-42d3-a456-426614174002"
 ATTEMPT_ID = "123e4567-e89b-42d3-a456-426614174003"
-TOKEN = "one-shot-receipt-token-value-0123456789"
+MESSAGE_ID = "123e4567-e89b-42d3-a456-426614174004"
 DELIVERY_ID = "dly_" + "a" * 64
 
 
 class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir="/private/tmp")
+        self.temp = tempfile.TemporaryDirectory(dir=Path(tempfile.gettempdir()).resolve())
         self.state_dir = Path(self.temp.name)
         os.chmod(self.state_dir, 0o700)
         self.commands = []
         self.poll_count = 0
         self.register_failures_remaining = 0
+        self.receipt_token = secrets.token_urlsafe(32)
+        self.routed = False
 
         async def control(reader, writer):
             try:
@@ -45,7 +48,7 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
                     self.poll_count += 1
                     result = {"delivery": self._delivery()} if self.poll_count == 1 else {"delivery": None}
                 elif command == "claude-client-reported":
-                    result = {"recorded": value["receiptToken"] == TOKEN}
+                    result = {"recorded": value["receiptToken"] == self.receipt_token}
                 else:
                     result = {"reason": "unsupported_command"}
                 writer.write(json.dumps(result).encode() + b"\n")
@@ -67,7 +70,7 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
         self.temp.cleanup()
 
     def _delivery(self):
-        return {
+        delivery = {
             "eventId": EVENT_ID, "deliveryId": DELIVERY_ID, "attemptId": ATTEMPT_ID,
             "principal": "owner", "agent": "agent", "runtimeId": RUNTIME_ID,
             "nodeGeneration": 1, "runtimeGeneration": 2, "attachmentGeneration": 3,
@@ -75,8 +78,14 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
             "eventReference": "ref_" + EVENT_ID,
             "runtimeProfile": {"profile": "assigned_stock_client", "client": "claude",
                                "conversationId": CONVERSATION_ID}, "nodeId": EVENT_ID,
-            "conversationId": CONVERSATION_ID, "receiptToken": TOKEN,
+            "conversationId": CONVERSATION_ID, "receiptToken": self.receipt_token,
         }
+        if self.routed:
+            delivery.update(
+                routingGeneration=6, namespace="work", agentIncarnation=0,
+                messageId=MESSAGE_ID, sourceStateVersion="msg:" + "b" * 64,
+            )
+        return delivery
 
     async def _start_server(self):
         env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
@@ -143,8 +152,9 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(event.get("params", {})), {"content", "meta"}, event)
         body = json.loads(event["params"]["content"])
         self.assertEqual(body["event"], "ref_" + EVENT_ID)
-        self.assertEqual(body["receiptToken"], TOKEN)
-        self.assertNotIn(TOKEN, json.dumps(event["params"]["meta"]))
+        self.assertEqual(body["receiptToken"], self.receipt_token)
+        self.assertNotIn("messageId", body)
+        self.assertNotIn(self.receipt_token, json.dumps(event["params"]["meta"]))
         self.assertEqual(self.commands[0], {
             "command": "claude-register", "runtimeId": RUNTIME_ID,
             "conversationId": CONVERSATION_ID,
@@ -157,7 +167,8 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
         await self._send({
             "jsonrpc": "2.0", "id": 3, "method": "tools/call",
             "params": {"name": "client_reported", "arguments": {
-                "deliveryId": DELIVERY_ID, "attemptId": ATTEMPT_ID, "receiptToken": TOKEN,
+                "deliveryId": DELIVERY_ID, "attemptId": ATTEMPT_ID,
+                "receiptToken": self.receipt_token,
             }},
         })
         callback = await self._read_id(3)
@@ -168,7 +179,7 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn({
             "command": "claude-client-reported", "runtimeId": RUNTIME_ID,
             "conversationId": CONVERSATION_ID, "deliveryId": DELIVERY_ID,
-            "attemptId": ATTEMPT_ID, "receiptToken": TOKEN,
+            "attemptId": ATTEMPT_ID, "receiptToken": self.receipt_token,
         }, self.commands)
 
         self.process.stdin.close()
@@ -178,6 +189,22 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.poll_count, polls_at_exit, "polling survived stdio shutdown")
         lock = next(self.state_dir.glob(".claude-channel-*.lock"))
         self.assertEqual(stat.S_IMODE(lock.stat().st_mode), 0o600)
+
+    async def test_routed_channel_notification_contains_message_id(self):
+        self.routed = True
+        await self._start_server()
+        await self._initialize()
+        await self._send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+        frames = []
+        while not any(frame.get("method") == "notifications/claude/channel" for frame in frames):
+            frames.append(await self._read())
+        event = next(frame for frame in frames if frame.get("method") == "notifications/claude/channel")
+        body = json.loads(event["params"]["content"])
+        self.assertEqual(body["messageId"], MESSAGE_ID)
+        self.assertEqual(body["event"], "ref_" + EVENT_ID)
+
+        self.process.stdin.close()
+        await asyncio.wait_for(self.process.wait(), timeout=3)
 
     async def test_transient_registration_failure_retries_before_polling(self):
         self.register_failures_remaining = 1
@@ -237,11 +264,15 @@ class ClaudeChannelStdioTests(unittest.IsolatedAsyncioTestCase):
         delivery = self._delivery()
         delivery.update(
             routingGeneration=6, namespace="work", agentIncarnation=0,
-            sourceStateVersion="msg:" + "b" * 64,
+            messageId=MESSAGE_ID, sourceStateVersion="msg:" + "b" * 64,
         )
         self.assertIs(_delivery(delivery, RUNTIME_ID, CONVERSATION_ID), delivery)
         for invalid in (EVENT_ID, -1, True):
             self.assertIsNone(_delivery({**delivery, "agentIncarnation": invalid}, RUNTIME_ID, CONVERSATION_ID))
+        self.assertIsNone(_delivery({key: value for key, value in delivery.items() if key != "messageId"},
+                                    RUNTIME_ID, CONVERSATION_ID), "routed message ID may not be omitted")
+        for invalid in ("not-a-uuid", "", None):
+            self.assertIsNone(_delivery({**delivery, "messageId": invalid}, RUNTIME_ID, CONVERSATION_ID))
         delivery["sourceStateVersion"] = "bad token"
         self.assertIsNone(_delivery(delivery, RUNTIME_ID, CONVERSATION_ID),
                           "invalid routed source version accepted")
