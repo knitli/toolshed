@@ -1,0 +1,136 @@
+{
+  "baseline": {
+    "toolshed": "df90f0ce0b2c9a69c22b8350c02074ff65edfa2d"
+  },
+  "boundsObserved": {
+    "completionClaimed": false,
+    "messageReplayObserved": false,
+    "nativeAcknowledgementObserved": false,
+    "onlyExpectedToolsCalled": true,
+    "replyHadNoFiles": true,
+    "sleepCompleted": true
+  },
+  "boundsPerTrial": {
+    "activeSeconds": 120,
+    "attachmentsAllowed": false,
+    "maxOutputTokensPerRequest": 512,
+    "operatorCountedTurns": 3,
+    "permanentReplyApproval": false,
+    "syntheticMessages": 2
+  },
+  "busyTimedRun": {
+    "apiRequestRecords": 3,
+    "browserShowsBotReply": true,
+    "browserSnapshotAt": "2026-11-11T02:48:17.218Z",
+    "channelEvent": {
+      "apiRequestTimestamp": "2026-11-11T02:47:11.417Z",
+      "channelTimestamp": "2026-11-11T02:47:02.058Z",
+      "messageIdMatchesSubmit": true,
+      "recordLocation": "transcript api-request-blob record 33, message.content[0].text, <channel> block",
+      "source": "plugin:fakechat:fakechat",
+      "syntheticTextSha256": "e6e0a363b14fee1bf6b66516784353b710cc73db9ee6ae701acb86cc8cfaf4e6"
+    },
+    "fileSubmitted": false,
+    "interpretation": "The synthetic channel event was queued during sleep and included in the next model request after the Bash tool completed; the model then issued the matching reply. This qualifies the bounded queue-and-after-busy-reply slice. It does not prove delivery to the model while the tool was still running.",
+    "replyBody": "CLAUDE_BUSY_7A654161",
+    "replyFilesFieldPresent": false,
+    "replyMatchesExpectedBody": true,
+    "replyTargetsSubmittedMessage": true,
+    "replyToolAt": "2026-11-11T02:47:13.654Z",
+    "replyToolResult": {
+      "isError": false,
+      "recordedAt": "2026-11-11T02:47:36.613Z",
+      "sent": true
+    },
+    "sessionId": "7a654161-b81e-4087-8b83-d28bf34742aa",
+    "sleepStartedAt": "2026-11-11T02:46:55.466Z",
+    "sleepToolResultAt": "2026-11-11T02:47:11.383Z",
+    "submitAt": "2026-11-11T02:47:02.046958Z",
+    "submitHttpStatus": 204,
+    "toolCalls": [
+      "Bash sleep 15",
+      "plugin fakechat reply"
+    ]
+  },
+  "channel": {
+    "name": "official fakechat",
+    "serverSha256": "7e1748e0935ce85681067cab06a6f7ab0920821811c00802702cfbe4fe706708",
+    "version": "0.0.1"
+  },
+  "cleanup": {
+    "fakechatOutboxAbsent": true,
+    "noInputSentDuringPortProbe": true,
+    "offlineQueueClaimed": false,
+    "ownedTrialPidsRemaining": [],
+    "portProbeAt": "2026-11-11T02:50:19.132093Z",
+    "postRunPortProbeConnectionRefused": true,
+    "reportedGuardExitCode": 2,
+    "reportedReason": "lineage_mismatch during Ctrl-D cleanup race"
+  },
+  "client": {
+    "binarySha256": "a9d237949db816a0b7afd88a9a8e1df36b3a597a30f5a41d1c0539eb180a3450",
+    "name": "Claude Code",
+    "version": "2.1.322"
+  },
+  "collectedAt": "2026-11-11T02:55:26.843490Z",
+  "disposition": {
+    "cloudGatesChanged": false,
+    "customChannelQualified": false,
+    "durableClientReceiptProven": false,
+    "knitliIntegrationQualified": false,
+    "officialInterfaceSlice": "idle/busy and zero-input same-session resume observed",
+    "productionEnabled": false,
+    "taskCompletionProven": false,
+    "turnStartProven": false
+  },
+  "evidenceScope": "Sanitized transcript, submit receipt, and browser snapshot audit. No API blobs, credentials, account data, system context, reasoning, or signatures included.",
+  "kind": "claude-channels-independent-proof-v1",
+  "priorRuns": [
+    {
+      "busyTest": {
+        "assistantResponseAt": "2026-11-11T02:41:38.045Z",
+        "assistantResponseReferencesAskedToolRestriction": true,
+        "busyBodySha256": "4a4fedc62b319e568a6eabfd8dd7e1a2d0990a5576fcae6960859c328c238fbc",
+        "busyChannelTimestamp": "2026-11-11T02:41:20.601Z",
+        "busyMarkerPresent": true,
+        "channelSource": "plugin:fakechat:fakechat",
+        "classification": "Busy event was present in the next model request after sleep, but the assistant did not invoke fakechat reply because it treated the foreground tool restriction as conflicting. No positive busy-reply qualification.",
+        "foregroundHumanPromptContainsOtherToolsRestriction": true,
+        "nextApiRequestAt": "2026-11-11T02:41:32.556Z",
+        "replyToolAfterBusyEvent": false,
+        "sleepStartedAt": "2026-11-11T02:41:16.509Z",
+        "sleepToolResultAt": "2026-11-11T02:41:32.546Z",
+        "transcriptLocation": "api-request-blob record 46, message.content[0].text, <channel> block"
+      },
+      "idleEvent": {
+        "channelTimestamp": "2026-11-11T02:40:41.847Z",
+        "classification": "Idle event received and replied to before the busy test.",
+        "replyToolAt": "2026-11-11T02:40:43.515Z",
+        "source": "plugin:fakechat:fakechat",
+        "transcriptRecordedAt": "2026-11-11T02:40:41.860Z"
+      },
+      "sessionId": "34497ae9-0c39-4da1-b380-acb94c716fe5"
+    },
+    {
+      "channelEventAt": "2026-11-11T02:44:15.430Z",
+      "classification": "Channel event follows sleep; idle-reply evidence only.",
+      "replyToolAt": "2026-11-11T02:44:17.610Z",
+      "sessionId": "c5fd813d-fdb8-475e-8ce1-0044f31af2a6",
+      "sleepStartedAt": "2026-11-11T02:43:48.486Z",
+      "sleepToolResultAt": "2026-11-11T02:44:04.534Z"
+    }
+  ],
+  "resumeAudit": {
+    "assistantIdsIndependentlyMatchResumeBefore": true,
+    "assistantRecordIdsUnchanged": true,
+    "cleanupObservedAt": "2026-11-11T02:53:40.500585+00:00",
+    "modelTurnsRequested": 0,
+    "newMessagesSent": 0,
+    "portFree": true,
+    "portLsofExitCode": 1,
+    "replayObserved": false,
+    "sameSessionId": true,
+    "transcriptByteHashMatchesResumeBefore": false,
+    "transcriptImmutabilityClaim": "Not made; assistant identifiers and readback counters are unchanged, but whole-file digest differs."
+  }
+}
