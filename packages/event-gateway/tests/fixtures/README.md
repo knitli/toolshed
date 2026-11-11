@@ -153,3 +153,22 @@ contains the seven snapshots, four Event v1 sources, and 109 control sources.
 The source blobs are pinned under their respective immutable event/control
 revisions. The archive SHA-256 is `3581f554f7c83ffb8f8d9fdce2753ce959c06fe7a50135f11481385b56e6fdb8`; its prepared fixture SHA-256 is `0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038`. This is trusted provenance only; consumer adoption and live watch
 renewal qualification remain separate.
+
+The additive `assigned-stock-claude-family` policy pins Event v1 exporter bytes
+at `39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939` and retains the exact control
+snapshot and source revision at `cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49`.
+Its archive contains the seven snapshots, four event sources, and 109 control
+sources; its SHA-256 is `b2085a6b0064f7294eba7d6efc4c85ebf94a52c0f48e587eb715026b6fb7f682`.
+Event and control source maps remain separate because their shared `protocol.ts`
+path has different bytes at the two pinned revisions. This is trusted policy
+provenance only; consumer rotation and live qualification remain separate.
+
+The additive `active-claude-v2` Messaging v2 profile preserves the semantic and
+wire fixtures, with source receipts updated to identify Cloud source commit
+`39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939` and tree
+`01640af90cc4273ef2f92ac6826c2e80b4a694c9`. The
+`messaging-v2-claude-active.zip` archive includes the exact
+protocol, fixture and lockfile sources plus Zod 4.6.5 files; its SHA-256 is
+`942cc567bff265a5424cb590d7d820ad7b2e1e91637ebc944aeba8812f85812a`. The
+existing active profile and archives are retained byte-for-byte. Policy
+authorization does not itself update a consumer or qualify runtime behavior.

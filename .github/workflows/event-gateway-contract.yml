@@ -231,6 +231,16 @@ jobs:
                        'event-v1/manifest.json': 'd20cb06b70b0144a4b3266efd02cd6054ebed7db0708e4385c5594039d8fdfca',
                        'event-control-v1/fixtures.json': '0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038',
                        'event-control-v1/manifest.json': '07c44485cca3b81cc7e1b50476606baf0a6c35ebf6395c975e2aed4dc69d12b4'}},
+           {'name': 'assigned-stock-claude-family',
+            'eventRevision': '39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939',
+            'controlRevision': 'cf74332d0d9544f64a3c8bfac6ae27fbbe17ba49',
+            'hashes': {'event-v1/protocol.schema.json': '60c5183225f65f49f9e62d94d10b2cb74d5e9ff166c122ae81215fc02ec96e37',
+                       'event-v1/protocol.ts': '6cc08bcc9971d0c502bde662c964061d8dc006e25c4acc29ee14385ad274beb7',
+                       'event-v1/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
+                       'event-v1/protocol-v1.json': '3f34e88d5cf1fb42318ba76435e77668551877250e00e8ca430ae697a6a271dd',
+                       'event-v1/manifest.json': '73a57dc72a4c7544df0188d2d1bec94d591d8821539f901127b6cafc5163bf8d',
+                       'event-control-v1/fixtures.json': '0778ed46d4546108cb19a530ee59d284774d909020f7a368eac2cd8ff5b2e038',
+                       'event-control-v1/manifest.json': '07c44485cca3b81cc7e1b50476606baf0a6c35ebf6395c975e2aed4dc69d12b4'}},
           )
 
           MESSAGING_V2_PATHS = (
@@ -256,6 +266,14 @@ jobs:
                'messaging-v2/messaging-v2-wire.json': 'a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032',
                'messaging-v2/source-receipt.json': '6a972450486b48eccdfc8a82f077139689bf5b3b5990c4a3ca7836c247f922df',
                'messaging-v2/wire-source-receipt.json': '4fd527d2d963d07a01c9b2d8491bee4813ad4f826eb4537698aba6ea6c1e58e2',
+             }},
+            {'name': 'active-claude-v2',
+             'adoption': 'active',
+             'hashes': {
+               'messaging-v2/messaging-protocol-semantics-v2.json': '0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f',
+               'messaging-v2/messaging-v2-wire.json': 'a66d74967f5470e193bfcb250cdc130fd22081b88c42b62c24fecf01d269f032',
+               'messaging-v2/source-receipt.json': '70fc595a40850288f005f98e820bd6335554e570c4efee01a8dd5be215831b3b',
+               'messaging-v2/wire-source-receipt.json': '1a654e0cf135559e1e307fed9ad280a09f7f803362f5a50cc7aec376250f8e8d',
              }},
           )
 
