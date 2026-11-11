@@ -453,6 +453,58 @@ class PairedInstallTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 INSTALL.locked_requirements(changed.encode(), self.api.project)
 
+    def test_locked_dependencies_follow_extra_even_after_base_package_reference(self):
+        lock = b'''version = 1
+[[package]]
+name = "fixture-root"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [{ name = "wrapper" }, { name = "pyjwt" }]
+
+[[package]]
+name = "wrapper"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [{ name = "pyjwt", extra = ["crypto"] }]
+wheels = [{ hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+
+[[package]]
+name = "pyjwt"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ hash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }]
+
+[package.optional-dependencies]
+crypto = [{ name = "crypto-backend" }]
+
+[[package]]
+name = "crypto-backend"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [{ hash = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }]
+'''
+        project = {
+            'name': 'fixture-root', 'version': '1.0.0',
+            'dependencies': ['wrapper>=1', 'pyjwt>=1'],
+        }
+        requirements = INSTALL.locked_requirements(lock, project)
+        self.assertEqual({line.split('==', 1)[0] for line in requirements.splitlines()},
+                         {'crypto-backend', 'pyjwt', 'wrapper'})
+
+    def test_locked_dependencies_select_mcp_runtime_for_supported_macos_and_linux(self):
+        lock = (INSTALL.ROOT / 'uv.lock').read_bytes()
+        outputs = []
+        for target in ('darwin', 'linux'):
+            with patch.object(INSTALL, 'sys', SimpleNamespace(
+                    version_info=(3, 13, 0), platform=target)):
+                requirements = INSTALL.locked_requirements(lock, self.api.project)
+            names = {line.split('==', 1)[0] for line in requirements.splitlines()}
+            outputs.append(requirements)
+            self.assertTrue({'mcp', 'pyjwt', 'cryptography', 'typing-extensions', 'uvicorn'} <= names)
+            self.assertNotIn('pywin32', names)
+            self.assertNotIn('ruff', names)
+        self.assertEqual(outputs[0], outputs[1])
+
     def test_installer_uses_hash_locked_no_dependency_resolution_and_fixed_index(self):
         requirements = self.root / 'requirements.txt'
         requirements.write_text('fixture==1 --hash=sha256:' + 'a' * 64)

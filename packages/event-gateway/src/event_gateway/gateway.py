@@ -357,6 +357,12 @@ class Gateway:
         if self.stock_only and envelope.get("runtimeProfile") is None:
             return self._row(delivery_id, "stock_profile_native_delivery_disabled")
         if envelope.get("runtimeProfile") is not None:
+            if envelope["runtimeProfile"].get("client") == "claude":
+                attempt = self.store.current_attempt(delivery_id)
+                if attempt and attempt["state"] == "client_reported" and attempt.get("native_ack"):
+                    return await self._send_claude_acknowledgment(delivery_id, attempt)
+                if attempt and attempt["state"] in ("claude_claimed", "ambiguous"):
+                    return self._row(delivery_id, "client_outcome_unknown")
             return await self._dispatch_stock_locked(delivery_id, envelope)
         if envelope.get("schemaVersion") != 1:
             return self._row(delivery_id, "messaging_v2_disabled")
@@ -433,9 +439,32 @@ class Gateway:
             return self._row(delivery_id, "stock_ack_pending")
         return self._row(delivery_id)
 
+    async def _send_claude_acknowledgment(self, delivery_id, attempt):
+        current = self.store.current_attempt(delivery_id)
+        if not current or current["attempt_id"] != attempt.get("attempt_id"):
+            return self._row(delivery_id)
+        if current.get("ack_state") == "client_reported":
+            return self._row(delivery_id)
+        acknowledgment = current.get("native_ack")
+        admission = current.get("admission")
+        if not acknowledgment or not admission:
+            return self._row(delivery_id, "client_outcome_unknown")
+        try:
+            result = await asyncio.wait_for(
+                self.authority.acknowledge(admission["envelope"], acknowledgment), 8,
+            )
+            if not isinstance(result, dict) or result.get("status") != "client_reported":
+                raise Refused("invalid_acknowledgment")
+            if not self.store.complete_claude_acknowledgment(
+                    delivery_id, current["attempt_id"], acknowledgment):
+                raise StoreError("acknowledgment_conflict")
+        except Exception:
+            return self._row(delivery_id, "client_reported_ack_pending")
+        return self._row(delivery_id)
+
     # Keep the durable fence, launch and ambiguous-outcome handling in one reviewed sequence.
     async def _dispatch_stock_locked(self, delivery_id, envelope):  # noqa: MC0001
-        """Claim and queue one opaque reference through the assigned stock CLI."""
+        """Claim one assigned stock-client event through the shared admission ledger."""
         from .stock_codex import (
             StockCodexAdapter, StockCodexError, StockCodexPreflightCancelled,
             StockCodexStartFenceError,
@@ -454,9 +483,7 @@ class Gateway:
             return self._row(delivery_id, "stock_assignment_unavailable")
         attempt = self.store.current_attempt(delivery_id)
         if attempt is None:
-            if profile["client"] != "codex":
-                return self._row(delivery_id, "unsupported_stock_client")
-            if not self.stock_codex_binary:
+            if profile["client"] == "codex" and not self.stock_codex_binary:
                 return self._row(delivery_id, "stock_client_disabled")
             early = self._begin_claim_or_row(delivery_id)
             if early is not None:
@@ -473,8 +500,12 @@ class Gateway:
         else:
             return self._row(delivery_id)
 
-        if profile["client"] != "codex":
-            return await self._retire_local(delivery_id, "unsupported_stock_client")
+        if profile["client"] == "claude":
+            try:
+                self.store.begin_claude_handoff(delivery_id, envelope["attemptId"])
+            except StoreError:
+                return self._row(delivery_id, "claude_handoff_unavailable")
+            return self._row(delivery_id, "claude_channel_pending")
         if not self.stock_codex_binary:
             return await self._retire_local(delivery_id, "stock_client_disabled")
         if _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000:
@@ -598,6 +629,15 @@ class Gateway:
         if envelope.get("runtimeProfile") is not None:
             async with self._runtime_guard(envelope["runtimeId"]):
                 attempt = self.store.current_attempt(delivery_id)
+                if envelope["runtimeProfile"].get("client") == "claude":
+                    if attempt and attempt["state"] == "client_reported" and attempt.get("native_ack"):
+                        return await self._send_claude_acknowledgment(delivery_id, attempt)
+                    if attempt and attempt["state"] in ("claude_claimed", "ambiguous"):
+                        return self._row(delivery_id, "client_outcome_unknown")
+                    if ((not attempt or attempt["state"] in ("claiming", "admitted"))
+                            and self._row(delivery_id)["status"] in ("queued", "held", "claiming", "admitted")):
+                        return await self._dispatch_stock_locked(delivery_id, envelope)
+                    return self._row(delivery_id)
                 if attempt and attempt["state"] == "settlement_pending":
                     return await self._settle(delivery_id)
                 if (attempt and attempt["state"] == "command_accepted"

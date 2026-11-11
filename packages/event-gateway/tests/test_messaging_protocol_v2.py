@@ -13,10 +13,10 @@ PACKAGE = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = PACKAGE / 'contracts/messaging-v2/messaging-protocol-semantics-v2.json'
 FIXTURE = json.loads(FIXTURE_PATH.read_text())
 ENVELOPE, ACK, NOW = FIXTURE['envelope'], FIXTURE['acknowledgment'], FIXTURE['nowMs']
-ACTIVE_SOURCE_COMMIT = 'e954904603b3467e30bbeaf7446977b61fbcb9ef'
+ACTIVE_SOURCE_COMMIT = '39c888d07c9556ce4e0bf9cc3fb54faa3fa3a939'
 ACTIVE_SOURCE_FILES = {
-    'apps/os/packages/event-runtime/src/messaging/protocol-v2.ts': '3f91122c7bd2d78d072ad51a9fb2fef4adfb99e3277bf4052196a54a74238193',
-    'apps/os/packages/event-runtime/src/protocol.ts': 'b9927658cd80cfb52222bcc20ffe748acbea0c16da06f0f283b55c6046b9284d',
+    'apps/os/packages/event-runtime/src/messaging/protocol-v2.ts': '44068f5f4717ac84401e10dcd90cbc6875d32bdf3d513235ba6fb02c4e942a07',
+    'apps/os/packages/event-runtime/src/protocol.ts': '6cc08bcc9971d0c502bde662c964061d8dc006e25c4acc29ee14385ad274beb7',
     'apps/os/packages/event-runtime/src/policy.ts': '2de281e76f796aa92b7809eff8039c74847bd0fd8303ef8453d408dcb39e15e3',
     'apps/os/packages/event-runtime/__tests__/fixtures/messaging-protocol-semantics-v2.json': (
         '0553380db6fbe8c9af557aea5847ce22cb52917da1daadb4491524e1f2cdf22f'
@@ -219,10 +219,10 @@ class MessagingProtocolV2Tests(unittest.TestCase):
     def test_source_receipt_records_active_policy_provenance_and_exact_fixture_bytes(self):
         receipt = json.loads((FIXTURE_PATH.parent / 'source-receipt.json').read_text())
         self.assertEqual(hashlib.sha256(FIXTURE_PATH.read_bytes()).hexdigest(), receipt['fixture']['sha256'])
-        self.assertEqual(receipt['purpose'], 'active_assigned_stock_v2_policy_adoption')
+        self.assertEqual(receipt['purpose'], 'active_claude_v2_policy_adoption')
         self.assertEqual(receipt['protocolVersion'], 2)
         self.assertTrue(receipt['trustedPolicyAdoption'])
-        self.assertEqual(receipt['profile'], 'active-assigned-stock-v2')
+        self.assertEqual(receipt['profile'], 'active-claude-v2')
         self.assertEqual(receipt['sourceCommit'], ACTIVE_SOURCE_COMMIT)
         self.assertEqual({file['path']: file['sha256'] for file in receipt['sourceFiles']},
                          ACTIVE_SOURCE_FILES)

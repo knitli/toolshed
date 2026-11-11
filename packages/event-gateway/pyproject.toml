@@ -11,6 +11,7 @@ license = "MIT OR Apache-2.0"
 dependencies = [
   "cryptography>=50.0.2,<51",
   "jsonschema>=4.25,<5",
+  "mcp==1.30.0",
   "websockets>=17.2,<18",
 ]
 

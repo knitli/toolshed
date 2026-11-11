@@ -88,6 +88,20 @@ class StoreTests(unittest.TestCase):
                    "runtimeProfile": {**profile, "conversationId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}}
         self.assertEqual(self.store.put_attachment(renewed)["runtimeProfile"], renewed["runtimeProfile"])
 
+    def test_claude_registration_rejects_expired_attachment_lease(self):
+        profile = {"profile": "assigned_stock_client", "client": "claude",
+                   "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
+        mapping = {**self.mapping, "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 2,
+                   "attachmentGeneration": 2, "consumerGeneration": 2,
+                   "runtimeProfile": profile, "leaseExpiresAt": self.now + 1}
+        mapping.pop("nativeSessionId", None)
+        mapping.pop("socketPath", None)
+        self.store.put_attachment(mapping)
+        self.now = mapping["leaseExpiresAt"]
+
+        with self.assertRaisesRegex(StoreError, "^claude_assignment_unavailable$"):
+            self.store.register_claude_channel(mapping["runtimeId"], profile["conversationId"])
+
     def test_stock_lease_renewal_is_exact_live_mapping_cas(self):
         profile = {"profile": "assigned_stock_client", "client": "codex",
                    "conversationId": "abcdefab-cdef-4abc-8def-abcdefabcdef"}
@@ -1043,7 +1057,7 @@ class StoreTests(unittest.TestCase):
         self.store.db.commit()
         self.store.close()
         self.store = Store(self.path, clock=self.clock)
-        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 6)
         self.assertEqual([tuple(row)[:-2] for row in self.store.db.execute("SELECT * FROM attempts")], attempts)
         self.assertEqual([tuple(row) for row in self.store.db.execute("SELECT * FROM deliveries ORDER BY id")], deliveries)
         self.assertIsNone(self.store.current_attempt(ident)["input_recorded_receipt"])
@@ -1073,7 +1087,7 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(self.store.native_receipt(direct)["submission_id"])
         self.assertEqual(self.store.native_receipt(direct)["turn_id"], request["clientUserMessageId"])
         self.assertEqual(self.store.native_receipt(legacy)["submission_id"], "legacy-queue-id")
-        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 6)
 
     def test_started_contradiction_cancels_pending_negative_settlement(self):
         ident, admission = self.admitted()
@@ -1152,7 +1166,7 @@ class StoreTests(unittest.TestCase):
             self.store.db.commit()
             self.store.close()
             self.store = Store(self.path, clock=self.clock)
-            self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+            self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 6)
             self.assertEqual(self.store.get(ident)["status"], "ambiguous")
             self.assertIsNone(self.store.current_attempt(ident))
             self.assertFalse(self.store.begin_claim(ident))

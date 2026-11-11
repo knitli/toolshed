@@ -2,16 +2,18 @@
 
 import fcntl
 import hashlib
+import hmac
 import json
 import math
 import os
 import re
+import secrets
 from pathlib import Path
 import sqlite3
 import stat
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class StoreError(ValueError):
@@ -137,11 +139,14 @@ class Store:
                 self.db.execute(f"ALTER TABLE attempts ADD COLUMN {column} TEXT")
         if "operator_disposition" not in columns:
             self.db.execute("ALTER TABLE attempts ADD COLUMN operator_disposition TEXT")
+        for column in ("claude_handoff", "claude_receipt_hash"):
+            if column not in columns:
+                self.db.execute(f"ALTER TABLE attempts ADD COLUMN {column} TEXT")
 
     def _initialize_schema(self):
         """Create tables, migrate columns, and mark interrupted submits ambiguous."""
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1, 2, 3, 4, 5):
+        if version not in (0, 1, 2, 3, 4, 5, 6):
             raise StoreError("unsupported_schema")
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
@@ -173,6 +178,7 @@ class Store:
                 self._migrate_native_turn_aliases()
             if version < 4:
                 self.db.execute("PRAGMA user_version=4")
+            self.db.execute("PRAGMA user_version=6")
             self.db.execute(
                 "UPDATE attempts SET state='ambiguous', reason='restart_during_submit', updated=? WHERE state='submitting'",
                 (self.clock(),),
@@ -285,7 +291,7 @@ class Store:
                          and "routingGeneration" in value
                          and isinstance(profile, dict)
                          and profile.get("profile") == "assigned_stock_client"
-                         and profile.get("client") == "codex") else None
+                         and profile.get("client") in ("codex", "claude")) else None
 
     def list_attachments(self):
         return [
@@ -744,7 +750,7 @@ class Store:
                 and "routingGeneration" in old
                 and isinstance(old.get("runtimeProfile"), dict)
                 and old["runtimeProfile"].get("profile") == "assigned_stock_client"
-                and old["runtimeProfile"].get("client") == "codex"
+                and old["runtimeProfile"].get("client") in ("codex", "claude")
                 and not any(key in old for key in ("nativeBinding", "nativeThreadId", "sessionId"))
                 and old.get("runtimeId") == mapping.get("runtimeId")
                 and all(old.get(key) == mapping.get(key) for key in ("principal", "agent"))
@@ -763,7 +769,7 @@ class Store:
                 and old.get("runtimeProfile") == mapping.get("runtimeProfile")
                 and isinstance(old.get("runtimeProfile"), dict)
                 and old["runtimeProfile"].get("profile") == "assigned_stock_client"
-                and old["runtimeProfile"].get("client") == "codex"
+                and old["runtimeProfile"].get("client") in ("codex", "claude")
                 and all(old.get(key) == mapping.get(key) for key in (*IDENTITY, "consumerGeneration")))
 
     def _validate_attachment_target(self, mapping, old, transfer, generations):
@@ -815,7 +821,7 @@ class Store:
         with self.db:
             if messaging:
                 self.db.execute("BEGIN IMMEDIATE")
-                self.db.execute("PRAGMA user_version=5")
+                self.db.execute("PRAGMA user_version=6")
             if transfer is not None:
                 self._revoke_transfer_source(mapping, transfer, target_reserve=target_reserve)
             if target_error is None:
@@ -1021,7 +1027,7 @@ class Store:
             if envelope["schemaVersion"] == 2:
                 self.db.execute("BEGIN IMMEDIATE")
                 self._matches(envelope)
-                self.db.execute("PRAGMA user_version=5")
+                self.db.execute("PRAGMA user_version=6")
             self.db.execute(
                 "INSERT INTO deliveries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -1061,7 +1067,7 @@ class Store:
         if row is None:
             return None
         result = dict(row)
-        for key in ("envelope", "admission", "native_request", "evidence", "receipt", "settlement", "started_receipt", "native_ack",
+        for key in ("envelope", "admission", "native_request", "evidence", "receipt", "settlement", "started_receipt", "native_ack", "claude_handoff",
                     "input_recorded_receipt", "native_observed_ack"):
             result[key] = json.loads(result[key]) if result[key] is not None else None
         return result
@@ -1430,7 +1436,8 @@ class Store:
             envelope = json.loads(delivery["envelope"])
             if (envelope.get("schemaVersion") not in (1, 2)
                     or not isinstance(envelope.get("runtimeProfile"), dict)
-                    or envelope["runtimeProfile"].get("profile") != "assigned_stock_client"):
+                    or envelope["runtimeProfile"].get("profile") != "assigned_stock_client"
+                    or envelope["runtimeProfile"].get("client") != "codex"):
                 raise StoreError("invalid_transition")
             admission = json.loads(attempt["admission"])
             try:
@@ -1488,6 +1495,248 @@ class Store:
             self.db.execute("UPDATE deliveries SET state='command_accepted',ack_state=NULL,reason=NULL,updated=? "
                             "WHERE id=?", (self.clock(), delivery_id))
         return json.loads(encoded)
+
+    def register_claude_channel(self, runtime_id, conversation_id):
+        """Confirm one explicit, current Claude conversation assignment."""
+        from .protocol import ProtocolError, validate_runtime_profile
+
+        mapping = self.get_attachment(runtime_id)
+        lease_expires_at = mapping.get("leaseExpiresAt") if mapping else None
+        try:
+            lease_is_current = (
+                type(lease_expires_at) in (int, float)
+                and math.isfinite(lease_expires_at)
+                and lease_expires_at > self.clock()
+            )
+        except (OverflowError, TypeError, ValueError):
+            lease_is_current = False
+        if not lease_is_current:
+            raise StoreError("claude_assignment_unavailable")
+        try:
+            profile = validate_runtime_profile(mapping.get("runtimeProfile") if mapping else None)
+        except ProtocolError:
+            raise StoreError("claude_assignment_unavailable") from None
+        if profile["client"] != "claude" or profile["conversationId"] != conversation_id:
+            raise StoreError("claude_assignment_unavailable")
+        fields = ("runtimeId", "nodeId", "nodeGeneration", "runtimeGeneration",
+                  "attachmentGeneration", "consumerGeneration", *MESSAGING_METADATA)
+        return {key: mapping[key] for key in fields if key in mapping}
+
+    def begin_claude_handoff(self, delivery_id, attempt_id):
+        """Persist one exact Claude handoff intent after the shared claim is admitted."""
+        from .protocol import ProtocolError, _timestamp, validate_runtime_profile
+
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            if row is None or row["state"] != "admitted" or row["admission"] is None or row["fenced"]:
+                raise StoreError("invalid_transition")
+            envelope = json.loads(row["envelope"])
+            admission = json.loads(row["admission"])
+            try:
+                profile = validate_runtime_profile(envelope.get("runtimeProfile"))
+                permit_issued = _timestamp(admission["permitIssuedAt"])
+                permit_expires = _timestamp(admission["permitExpiresAt"])
+                if (profile["client"] != "claude" or not permit_issued <= self.clock() * 1000 < permit_expires
+                        or admission["envelope"] != envelope):
+                    raise StoreError("invalid_transition")
+                mapping = self._matches(envelope)
+            except (ProtocolError, KeyError, TypeError, ValueError):
+                raise StoreError("invalid_transition") from None
+            handoff = {
+                key: envelope[key] for key in (
+                    "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+                    "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                    "routingGeneration", "sourceStateVersion", "eventReference", "runtimeProfile",
+                ) if key in envelope
+            }
+            handoff.update(nodeId=mapping["nodeId"], conversationId=profile["conversationId"])
+            if "routingGeneration" in envelope:
+                handoff.update(namespace=mapping["namespace"], agentIncarnation=mapping["agentIncarnation"])
+            encoded = _json(handoff)
+            if row["claude_handoff"] is not None:
+                if row["claude_handoff"] != encoded:
+                    raise StoreError("admission_conflict")
+                return json.loads(encoded)
+            self._spend(row, len(encoded.encode()))
+            self.db.execute(
+                "UPDATE attempts SET claude_handoff=?,updated=? WHERE delivery_id=? AND attempt_id=?",
+                (encoded, self.clock(), delivery_id, attempt_id),
+            )
+        return json.loads(encoded)
+
+    def claim_claude_handoff(self, runtime_id, conversation_id):
+        """Atomically fence one poll attempt and disclose its receipt token once."""
+        from .protocol import _timestamp
+
+        candidates = self.db.execute(
+            "SELECT a.*,d.state AS delivery_state FROM attempts a JOIN deliveries d ON d.id=a.delivery_id "
+            "WHERE a.state='admitted' AND a.claude_handoff IS NOT NULL AND a.claude_receipt_hash IS NULL "
+            "AND d.state='admitted' ORDER BY a.updated,a.delivery_id"
+        ).fetchall()
+        for candidate in candidates:
+            handoff = json.loads(candidate["claude_handoff"])
+            if (handoff.get("runtimeId") != runtime_id
+                    or handoff.get("conversationId") != conversation_id):
+                continue
+            with self.db:
+                self.db.execute("BEGIN IMMEDIATE")
+                row = self._attempt(handoff["deliveryId"], handoff["attemptId"])
+                delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (handoff["deliveryId"],)).fetchone()
+                if (row is None or delivery is None or row["state"] != "admitted"
+                        or row["fenced"] or row["claude_receipt_hash"] is not None
+                        or delivery["state"] != "admitted"
+                        or row["claude_handoff"] != candidate["claude_handoff"]):
+                    continue
+                envelope = json.loads(row["envelope"])
+                admission = json.loads(row["admission"])
+                if (_timestamp(admission["permitIssuedAt"]) > self.clock() * 1000
+                        or _timestamp(admission["permitExpiresAt"]) <= self.clock() * 1000
+                        or admission["envelope"] != envelope):
+                    continue
+                try:
+                    mapping = self._matches(envelope)
+                except StoreError:
+                    continue
+                if any(mapping.get(key) != handoff.get(key) for key in (
+                        "runtimeId", "nodeId", "principal", "agent", "nodeGeneration",
+                        "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                        *MESSAGING_METADATA)):
+                    continue
+                token = secrets.token_urlsafe(32)
+                token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+                self._spend(row, len(token_hash))
+                self.db.execute(
+                    "UPDATE attempts SET state='claude_claimed',claude_receipt_hash=?,reason='client_outcome_unknown',updated=? "
+                    "WHERE delivery_id=? AND attempt_id=?",
+                    (token_hash, self.clock(), handoff["deliveryId"], handoff["attemptId"]),
+                )
+                self.db.execute(
+                    "UPDATE deliveries SET state='ambiguous',reason='client_outcome_unknown',updated=? WHERE id=?",
+                    (self.clock(), handoff["deliveryId"]),
+                )
+            return {"delivery": {**handoff, "receiptToken": token}}
+        return {"delivery": None}
+
+    def record_claude_client_reported(self, runtime_id, conversation_id, delivery_id,
+                                      attempt_id, receipt_token):
+        """Persist exact callback evidence and its cloud ACK obligation atomically."""
+        if not isinstance(receipt_token, str) or re.fullmatch(r"[A-Za-z0-9_-]{43}", receipt_token) is None:
+            raise StoreError("invalid_claude_receipt")
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if row is None or delivery is None or row["claude_handoff"] is None:
+                raise StoreError("invalid_claude_receipt")
+            handoff = json.loads(row["claude_handoff"])
+            expected_hash = row["claude_receipt_hash"] or ""
+            supplied_hash = hashlib.sha256(receipt_token.encode("ascii")).hexdigest()
+            if (not hmac.compare_digest(expected_hash, supplied_hash)
+                    or handoff.get("runtimeId") != runtime_id
+                    or handoff.get("conversationId") != conversation_id
+                    or handoff.get("deliveryId") != delivery_id
+                    or handoff.get("attemptId") != attempt_id):
+                raise StoreError("invalid_claude_receipt")
+            envelope = json.loads(row["envelope"])
+            admission = json.loads(row["admission"]) if row["admission"] is not None else None
+            if (not isinstance(envelope.get("runtimeProfile"), dict)
+                    or envelope["runtimeProfile"].get("client") != "claude"):
+                raise StoreError("stale_claude_receipt")
+            expected_handoff = {key: envelope[key] for key in (
+                "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+                "nodeGeneration", "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                "routingGeneration", "namespace", "agentIncarnation", "sourceStateVersion",
+                "eventReference", "runtimeProfile",
+            ) if key in envelope}
+            if isinstance(admission, dict):
+                expected_handoff.update(nodeId=admission.get("nodeId"),
+                                        conversationId=envelope.get("runtimeProfile", {}).get("conversationId"))
+            if "routingGeneration" in envelope:
+                expected_handoff.update(
+                    namespace=envelope["canonicalSubject"]["namespace"],
+                    agentIncarnation=envelope["canonicalSubject"]["agentIncarnation"],
+                )
+            if (not isinstance(admission, dict) or admission.get("envelope") != envelope
+                    or handoff != expected_handoff):
+                raise StoreError("stale_claude_receipt")
+            if row["state"] == "client_reported":
+                return {"status": "client_reported"}
+            mapping = self.get_attachment(runtime_id)
+            if (row["state"] != "claude_claimed" or row["fenced"]
+                    or not mapping or any(mapping.get(key) != handoff.get(key) for key in (
+                        "runtimeId", "nodeId", "principal", "agent", "nodeGeneration",
+                        "runtimeGeneration", "attachmentGeneration", "consumerGeneration",
+                        "runtimeProfile", *MESSAGING_METADATA))):
+                raise StoreError("stale_claude_receipt")
+            timestamp = datetime.fromtimestamp(self.clock(), timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            acknowledgment = {
+                **{key: envelope[key] for key in (
+                    "eventId", "deliveryId", "attemptId", "principal", "agent", "runtimeId",
+                    "nodeGeneration", "runtimeGeneration", "attachmentGeneration",
+                )},
+                "deliveredSourceStateVersion": envelope["sourceStateVersion"],
+                "acknowledgedAt": timestamp,
+                "status": "client_reported",
+                "runtimeProfile": envelope["runtimeProfile"],
+            }
+            if envelope.get("schemaVersion") == 2:
+                acknowledgment.update(schemaVersion=2, nodeId=envelope["nodeId"],
+                                      permitId=admission["permitId"])
+            else:
+                acknowledgment["schemaVersion"] = 1
+            for key in ("consumerGeneration", "routingGeneration"):
+                if key in envelope:
+                    acknowledgment[key] = envelope[key]
+            try:
+                if envelope.get("schemaVersion") == 2:
+                    from . import messaging_protocol_v2 as messaging
+                    normalized = messaging.parse_acknowledgment(
+                        _json(acknowledgment), now_ms=self.clock() * 1000,
+                    )
+                    valid = (messaging.acknowledgment_matches_delivery(envelope, normalized)
+                             and normalized["status"] == "client_reported"
+                             and normalized["permitId"] == admission["permitId"])
+                else:
+                    from .protocol import acknowledgment_matches_delivery, parse_acknowledgment
+                    normalized = parse_acknowledgment(_json(acknowledgment), now_ms=self.clock() * 1000)
+                    valid = (acknowledgment_matches_delivery(envelope, normalized)
+                             and normalized["status"] == "client_reported")
+            except (ValueError, TypeError, KeyError):
+                valid = False
+            if not valid:
+                raise StoreError("invalid_acknowledgment")
+            acknowledgment = normalized
+            self._spend(row, len(_json(acknowledgment).encode()))
+            self.db.execute(
+                "UPDATE attempts SET state='client_reported',native_ack=?,reason=NULL,updated=? "
+                "WHERE delivery_id=? AND attempt_id=?",
+                (_json(acknowledgment), self.clock(), delivery_id, attempt_id),
+            )
+            self.db.execute(
+                "UPDATE deliveries SET state='client_reported',ack_state=NULL,reason=NULL,updated=? WHERE id=?",
+                (self.clock(), delivery_id),
+            )
+        return {"status": "client_reported"}
+
+    def complete_claude_acknowledgment(self, delivery_id, attempt_id, acknowledgment):
+        """Close the Claude cloud ACK obligation only after exact authority confirmation."""
+        encoded = _json(acknowledgment)
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._attempt(delivery_id, attempt_id)
+            delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
+            if (row is None or delivery is None or row["state"] != "client_reported"
+                    or delivery["state"] != "client_reported" or row["native_ack"] != encoded):
+                return False
+            if delivery["ack_state"] == "client_reported":
+                return True
+            self._spend(row)
+            self.db.execute("UPDATE deliveries SET ack_state='client_reported',updated=? WHERE id=?",
+                            (self.clock(), delivery_id))
+            self.db.execute("UPDATE attempts SET reserved_bytes=0,updated=? WHERE delivery_id=? AND attempt_id=?",
+                            (self.clock(), delivery_id, attempt_id))
+        return True
 
     def complete_stock_acknowledgment(self, delivery_id, attempt_id, acknowledgment):
         """Mark the persisted stock ACK complete without implying client receipt."""
@@ -2022,9 +2271,10 @@ class Store:
             self._public(row)
             for row in self.db.execute(
                 "SELECT * FROM deliveries WHERE (state IN "
-                "('claiming','admitted','settlement_pending','submitted','ambiguous') "
+                "('claiming','admitted','settlement_pending','submitted','ambiguous','client_reported') "
                 "OR (state='observed' AND ack_state IS NOT state) "
-                "OR (state='command_accepted' AND ack_state IS NOT state)) "
+                "OR (state='command_accepted' AND ack_state IS NOT state) "
+                "OR (state='client_reported' AND ack_state IS NOT state)) "
                 "ORDER BY created,id"
             )
             if (envelope := json.loads(row["envelope"])).get("schemaVersion") == 1
@@ -2050,6 +2300,9 @@ class Store:
                 if (row["state"] == row["ack_state"] == row["attempt_state"] == "command_accepted"
                         and row["attempt_id"] == envelope["attemptId"]):
                     continue
+                if (row["state"] == row["ack_state"] == row["attempt_state"] == "client_reported"
+                        and row["attempt_id"] == envelope["attemptId"]):
+                    continue
             obligations.add(row["id"])
         return obligations
 
@@ -2058,7 +2311,8 @@ class Store:
             "SELECT id FROM deliveries WHERE state IN "
             "('held','queued','claiming','admitted','settlement_pending','submitting','submitted','ambiguous') "
             "OR (state='observed' AND ack_state IS NOT state) "
-            "OR (state='command_accepted' AND ack_state IS NOT state)"
+            "OR (state='command_accepted' AND ack_state IS NOT state) "
+            "OR (state='client_reported' AND ack_state IS NOT state)"
         )}
         return len(pending | self._messaging_obligations())
 
@@ -2075,7 +2329,8 @@ class Store:
             )
             expired = self.db.execute(
                 "SELECT id FROM deliveries WHERE (state='stale' OR (state='observed' AND ack_state=state) "
-                "OR (state='command_accepted' AND ack_state=state)) "
+                "OR (state='command_accepted' AND ack_state=state) "
+                "OR (state='client_reported' AND ack_state=state)) "
                 "AND retain_until<? AND updated<?", (self.clock(), self.clock() - RETENTION),
             ).fetchall()
             removable = [(row[0],) for row in expired if row[0] not in protected]

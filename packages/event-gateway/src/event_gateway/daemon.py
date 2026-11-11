@@ -46,6 +46,33 @@ def status(store, dispatch=None):
 def _execute_control_command(store, request_value, dispatch=None):
     if request_value == {"command": "status"}:
         return status(store, dispatch)
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "runtimeId", "conversationId"}
+            and request_value["command"] == "claude-register"
+            and _uuid(request_value["runtimeId"]) and _uuid(request_value["conversationId"])):
+        return {"registered": True, **store.register_claude_channel(
+            request_value["runtimeId"], request_value["conversationId"],
+        )}
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "runtimeId", "conversationId"}
+            and request_value["command"] == "claude-poll"
+            and _uuid(request_value["runtimeId"]) and _uuid(request_value["conversationId"])):
+        return store.claim_claude_handoff(
+            request_value["runtimeId"], request_value["conversationId"],
+        )
+    if (isinstance(request_value, dict)
+            and set(request_value) == {"command", "runtimeId", "conversationId", "deliveryId",
+                                       "attemptId", "receiptToken"}
+            and request_value["command"] == "claude-client-reported"
+            and _uuid(request_value["runtimeId"]) and _uuid(request_value["conversationId"])
+            and isinstance(request_value["deliveryId"], str)
+            and isinstance(request_value["attemptId"], str)
+            and isinstance(request_value["receiptToken"], str)):
+        store.record_claude_client_reported(
+            request_value["runtimeId"], request_value["conversationId"],
+            request_value["deliveryId"], request_value["attemptId"], request_value["receiptToken"],
+        )
+        return {"recorded": True}
     if request_value == {"command": "stock-recovery-list"}:
         return store.list_stock_recovery()
     if (isinstance(request_value, dict)
@@ -226,7 +253,7 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
         profile = mapping["runtimeProfile"]
         request = {
             "operation": "renew", "runtimeId": mapping["runtimeId"],
-            "conversationId": profile["conversationId"],
+            "conversationId": profile["conversationId"], "client": profile["client"],
             "expectedRuntimeGeneration": mapping["runtimeGeneration"],
             "expectedAttachmentGeneration": mapping["attachmentGeneration"],
         }
@@ -564,7 +591,8 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                 except StoreError:
                     pass
 # Keep pending-response recovery and cloud-poll scheduling in one owner-loop sequence.
-async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: MC0001
+async def _stock_renewal_worker(
+        store, cloud, stop, watch_ready=None, *, stock_codex_enabled=True):  # noqa: MC0001
     """Renew only live assigned-stock mappings already present in the local ledger."""
     suspended = set()
     pending = {}
@@ -625,6 +653,8 @@ async def _stock_renewal_worker(store, cloud, stop, watch_ready=None):  # noqa: 
             for mapping in attachments:
                 profile = mapping.get("runtimeProfile")
                 if not isinstance(profile, dict) or profile.get("profile") != "assigned_stock_client":
+                    continue
+                if profile.get("client") == "codex" and not stock_codex_enabled:
                     continue
                 if any(mapping.get(key) != getattr(cloud, client_key) for key, client_key in (
                         ("principal", "principal"), ("agent", "agent"),
@@ -773,7 +803,7 @@ def _control_handler(store, dispatch):
 
 async def serve(state_dir, *, dispatch_config=None, stock_only=False):
     configured = load_dispatch_config(dispatch_config, state_dir) if dispatch_config is not None else None
-    if stock_only and (configured is None or not configured[0].get("stockCodexBinary")):
+    if stock_only and configured is None:
         raise SecurityError("stock_profile_requires_stock_client")
     with Store(state_dir) as store:
         path = Path(state_dir) / "control.sock"
@@ -813,7 +843,7 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
                 await listener.start(config["listenHost"], config["listenPort"])
                 worker = asyncio.create_task(_dispatch_worker(gateway, stop))
                 worker.add_done_callback(lambda _task: _stop_dispatch(dispatch, listener, stop))
-                if config.get("stockCodexBinary"):
+                if stock_only or config.get("stockCodexBinary"):
                     watch_ready, watch_event = {}, asyncio.Event()
                     stock_watch_worker = asyncio.create_task(
                         _stock_watch_worker(store, cloud, stop, watch_ready, watch_event),
@@ -823,6 +853,7 @@ async def serve(state_dir, *, dispatch_config=None, stock_only=False):
                     )
                     stock_worker = asyncio.create_task(_stock_renewal_worker(
                         store, cloud, stop, (watch_ready, watch_event),
+                        stock_codex_enabled=bool(config.get("stockCodexBinary")),
                     ))
                     stock_worker.add_done_callback(
                         lambda _task: _stop_dispatch(dispatch, listener, stop),

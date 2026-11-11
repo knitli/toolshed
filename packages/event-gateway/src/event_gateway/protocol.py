@@ -128,7 +128,7 @@ def validate_runtime_profile(value):
     if (not isinstance(value, dict)
             or set(value) != {'profile', 'client', 'conversationId'}
             or value.get('profile') != 'assigned_stock_client'
-            or value.get('client') != 'codex'
+            or value.get('client') not in ('codex', 'claude')
             or not isinstance(value.get('conversationId'), str)
             or not re.fullmatch(
                 r'[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',
@@ -144,7 +144,9 @@ def _parse(body, acknowledgment, now_ms):
     if 'runtimeProfile' in value:
         # The upstream Zod refinement compares two fields; JSON Schema cannot express it.
         if (value.get('consumerGeneration') != value['attachmentGeneration']
-                or (acknowledgment and value['status'] != 'command_accepted')):
+                or (acknowledgment and value['status'] != (
+                    'command_accepted' if value['runtimeProfile']['client'] == 'codex'
+                    else 'client_reported'))):
             raise ProtocolError('invalid_acknowledgment' if acknowledgment else 'invalid_envelope')
     now = time.time() * 1000 if now_ms is None else now_ms
     if not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now):
@@ -204,14 +206,18 @@ def acknowledgment_matches_delivery(envelope, acknowledgment):
             'nodeGeneration', 'runtimeGeneration', 'attachmentGeneration', 'consumerGeneration')
     return (
         all(acknowledgment.get(key) == envelope.get(key) for key in keys)
-        and ('runtimeProfile' not in envelope or acknowledgment.get('status') == 'command_accepted')
+        and ('runtimeProfile' not in envelope or acknowledgment.get('status') == (
+            'command_accepted' if envelope['runtimeProfile']['client'] == 'codex'
+            else 'client_reported'))
         and acknowledgment.get('runtimeProfile') == envelope.get('runtimeProfile')
         and acknowledgment.get('deliveredSourceStateVersion') == envelope.get('sourceStateVersion')
     )
 
 
 def acknowledgment_advances_current_watermark(envelope, acknowledgment, current_source_state_version):
-    settled = (acknowledgment.get('status') == 'command_accepted'
-               if envelope.get('runtimeProfile') else acknowledgment.get('status') == 'observed')
+    settled = (acknowledgment.get('status') == (
+        'command_accepted' if envelope['runtimeProfile']['client'] == 'codex'
+        else 'client_reported') if envelope.get('runtimeProfile')
+        else acknowledgment.get('status') == 'observed')
     return (acknowledgment_matches_delivery(envelope, acknowledgment) and settled
             and acknowledgment['deliveredSourceStateVersion'] == current_source_state_version)

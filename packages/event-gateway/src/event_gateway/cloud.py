@@ -805,11 +805,14 @@ _AMBIGUOUS_COMMIT_PATHS = _NATIVE_COMMIT_PATHS | {"/v1/runtimes/assigned-stock"}
 
 
 def _stock_assignment_request(value):
-    """Validate the non-native, owner-directed Codex conversation assignment CAS."""
-    _closed(value, ("operation", "runtimeId", "conversationId",
-                    "expectedRuntimeGeneration", "expectedAttachmentGeneration"),
-            code="invalid_request")
+    """Validate the non-native, owner-directed stock-client conversation assignment CAS."""
+    fields = {"operation", "runtimeId", "conversationId",
+              "expectedRuntimeGeneration", "expectedAttachmentGeneration"}
+    if not isinstance(value, dict) or value.keys() - (fields | {"client"}) or not fields <= value.keys():
+        raise CloudError("invalid_request")
+    value = {**value, "client": value.get("client", "codex")}
     if (value["operation"] not in ("attach", "renew")
+            or value["client"] not in ("codex", "claude")
             or not _uuid(value["runtimeId"]) or not _uuid(value["conversationId"])):
         raise CloudError("invalid_request")
     runtime_generation = value["expectedRuntimeGeneration"]
@@ -828,7 +831,7 @@ def _stock_assignment_request(value):
 def _stock_assignment_response(value, request, client):
     _closed(value, ("status", "runtimeId", "runtimeProfile", "nodeId", "nodeGeneration",
                     "runtimeGeneration", "attachmentGeneration", "leaseUntil"))
-    expected_profile = {"profile": "assigned_stock_client", "client": "codex",
+    expected_profile = {"profile": "assigned_stock_client", "client": request["client"],
                         "conversationId": request["conversationId"]}
     try:
         lease_until = _timestamp(value["leaseUntil"])
@@ -1305,13 +1308,19 @@ class CloudClient:
                 ack = messaging.parse_acknowledgment(_json(acknowledgment), now_ms=self._clock() * 1000)
             except (MessagingProtocolError, TypeError, ValueError, KeyError, RecursionError):
                 raise CloudError("invalid_acknowledgment") from None
+            profile = parsed.get("runtimeProfile")
+            expected_status = (
+                ("command_accepted" if profile["client"] == "codex" else "client_reported")
+                if isinstance(profile, dict) else None
+            )
             if (not messaging._runtime_profile(parsed.get("runtimeProfile"))
                     or not messaging.acknowledgment_matches_delivery(parsed, ack)
-                    or ack.get("status") != "command_accepted"):
+                    or (expected_status is not None and ack.get("status") != expected_status)
+                    or (expected_status is None and ack.get("status") not in ("submitted", "observed"))):
                 raise CloudError("identity_mismatch")
             result = await self._post("/v1/ack", ack)
             _closed(result, ("status", "current"))
-            if result["status"] != "command_accepted" or not isinstance(result["current"], bool):
+            if result["status"] != ack["status"] or not isinstance(result["current"], bool):
                 raise CloudError("invalid_response")
             return result
         parsed = self._envelope(envelope, historical=True)

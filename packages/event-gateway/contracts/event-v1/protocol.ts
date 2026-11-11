@@ -48,8 +48,15 @@ const githubSubjectSchema = z.strictObject({
 
 export const AssignedStockRuntimeProfileSchema = z.strictObject({
   profile: z.literal("assigned_stock_client"),
-  client: z.literal("codex"),
+  client: z.enum(["codex", "claude"]),
   conversationId: uuidV4OrV7Schema,
+});
+
+const CodexAssignedStockRuntimeProfileSchema = AssignedStockRuntimeProfileSchema.extend({
+  client: z.literal("codex"),
+});
+const ClaudeAssignedStockRuntimeProfileSchema = AssignedStockRuntimeProfileSchema.extend({
+  client: z.literal("claude"),
 });
 
 const commonEnvelopeShape = {
@@ -241,8 +248,15 @@ const observedAcknowledgmentSchema = z.strictObject({
 const commandAcceptedAcknowledgmentSchema = z.strictObject({
   ...commonAcknowledgmentShape,
   consumerGeneration: generationSchema,
-  runtimeProfile: AssignedStockRuntimeProfileSchema,
+  runtimeProfile: CodexAssignedStockRuntimeProfileSchema,
   status: z.literal("command_accepted"),
+});
+
+const clientReportedAcknowledgmentSchema = z.strictObject({
+  ...commonAcknowledgmentShape,
+  consumerGeneration: generationSchema,
+  runtimeProfile: ClaudeAssignedStockRuntimeProfileSchema,
+  status: z.literal("client_reported"),
 });
 
 /**
@@ -255,6 +269,7 @@ export const EventObservationAckSchema = z.union([
   submittedAcknowledgmentSchema,
   observedAcknowledgmentSchema,
   commandAcceptedAcknowledgmentSchema,
+  clientReportedAcknowledgmentSchema,
 ]).refine(value => !("runtimeProfile" in value) || value.consumerGeneration === value.attachmentGeneration, {
   message: "assigned stock profile requires consumerGeneration to match attachmentGeneration",
 });
@@ -614,7 +629,9 @@ export function acknowledgmentMatchesDelivery(
     acknowledgment.consumerGeneration === envelope.consumerGeneration &&
     (runtimeProfile === undefined
       ? !Object.hasOwn(acknowledgment, "runtimeProfile")
-      : acknowledgment.status === "command_accepted" && "runtimeProfile" in acknowledgment
+      : (runtimeProfile.client === "codex"
+        ? acknowledgment.status === "command_accepted"
+        : acknowledgment.status === "client_reported") && "runtimeProfile" in acknowledgment
         && acknowledgment.runtimeProfile.profile === runtimeProfile.profile
         && acknowledgment.runtimeProfile.client === runtimeProfile.client
         && acknowledgment.runtimeProfile.conversationId === runtimeProfile.conversationId) &&
@@ -640,7 +657,9 @@ export function acknowledgmentAdvancesCurrentWatermark(
       acknowledgment,
     ) &&
     ("runtimeProfile" in currentDestinationEnvelope && currentDestinationEnvelope.runtimeProfile
-      ? acknowledgment.status === "command_accepted"
+      ? currentDestinationEnvelope.runtimeProfile.client === "codex"
+        ? acknowledgment.status === "command_accepted"
+        : acknowledgment.status === "client_reported"
       : acknowledgment.status === "observed") &&
     acknowledgment.deliveredSourceStateVersion === currentSourceStateVersion
   );
