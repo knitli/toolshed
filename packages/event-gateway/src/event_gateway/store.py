@@ -421,6 +421,7 @@ class Store:
         ).fetchone()
         value = json.loads(old[0]) if old else {"watch": watch, "pending": None, "failure": None}
         value.pop("observed", None)
+        value.setdefault("indeterminate", [])
         if value["pending"] is None:
             value["watch"] = watch
         if len(_json(value).encode()) > 16384:
@@ -481,7 +482,7 @@ class Store:
             if key in current_keys:
                 continue
             pending = data["pending"]
-            if pending is None:
+            if pending is None and not data.get("indeterminate"):
                 remove.append((runtime, row[0], row[1]))
         if remove:
             try:
@@ -520,6 +521,43 @@ class Store:
                     (_json(value), self.clock(), runtime, key, incarnation),
                 )
             return True
+        except sqlite3.Error:
+            raise StoreError("storage_unavailable") from None
+
+    def reconcile_stock_watch_resume(self, runtime, subject, incarnation, request, watch):
+        """Archive an unresolved CAS only beside its exact higher-lease owner proof."""
+        key = _json(subject)
+        row = self.db.execute(
+            "SELECT data FROM stock_watches WHERE runtime=? AND subject=? AND incarnation=?",
+            (runtime, key, incarnation),
+        ).fetchone()
+        if row is None:
+            return False
+        value = json.loads(row[0])
+        pending = value.get("pending")
+        if pending is None or pending.get("request") != request:
+            return False
+        if (watch.get("subject") != subject or watch.get("incarnation") != incarnation
+                or watch.get("state") != "attached" or watch.get("attachment") is None):
+            return False
+        history = value.setdefault("indeterminate", [])
+        history.append({
+            "request": request, "startedAt": pending["startedAt"],
+            "status": "indeterminate", "resolution": "superseded_by_higher_lease",
+            "authoritativeWatch": watch,
+        })
+        value.update(watch=watch, pending=None, failure=None, receipt=None)
+        encoded = _json(value)
+        if len(encoded.encode()) > 16384:
+            raise StoreError("invalid_stock_watch")
+        try:
+            self._capacity(32768 + len(encoded.encode()) * 3)
+            with self.db:
+                cursor = self.db.execute(
+                    "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
+                    (encoded, self.clock(), runtime, key, incarnation),
+                )
+            return cursor.rowcount == 1
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
@@ -2391,6 +2429,7 @@ class Store:
             "stockWatchRenewal": {
                 "associations": len(watch_rows),
                 "pending": sum(row["pending"] is not None for row in watch_rows),
+                "indeterminate": sum(len(row.get("indeterminate", [])) for row in watch_rows),
                 "failures": watch_failures,
                 "capacity": len(watch_rows) >= 32,
             },

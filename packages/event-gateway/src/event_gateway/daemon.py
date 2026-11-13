@@ -388,7 +388,39 @@ def _watch_receipt_matches(original, renewed):
             and renewed_attachment["leaseUntil"] > original_attachment["leaseUntil"])
 
 
-def _stock_watch_page_is_stale(store, runtime, watch):
+def _watch_resume_matches(original, request, projection, now_ms):
+    """Match a fresh owner projection that proves a distinct higher lease revision."""
+    if not _watch_receipt_identity_matches(original, projection):
+        return False
+    attachment = projection.get("attachment")
+    old_attachment = original.get("attachment")
+    if not isinstance(attachment, dict) or not isinstance(old_attachment, dict):
+        return False
+    return (attachment.get("leaseRevision") > max(
+                old_attachment.get("leaseRevision", 0), request.get("expectedLeaseRevision", 0))
+            and attachment.get("leaseUntil", 0) > now_ms)
+
+
+def _watch_receipt_identity_matches(original, renewed):
+    """Compare watch identity while ignoring only mutable source-control health."""
+    original_attachment = original.get("attachment")
+    renewed_attachment = renewed.get("attachment")
+    if not isinstance(original_attachment, dict) or not isinstance(renewed_attachment, dict):
+        return False
+    original_control, renewed_control = original.get("sourceControl"), renewed.get("sourceControl")
+    return (renewed.get("subject") == original.get("subject")
+            and renewed.get("incarnation") == original.get("incarnation")
+            and renewed.get("routingRevision") == original.get("routingRevision")
+            and renewed.get("lifecycleEpoch") == original.get("lifecycleEpoch")
+            and renewed.get("state") == original.get("state")
+            and renewed.get("source") == original.get("source")
+            and isinstance(original_control, dict) and isinstance(renewed_control, dict)
+            and ({key: value for key, value in renewed_control.items() if key not in ("status", "reason")}
+                 == {key: value for key, value in original_control.items() if key not in ("status", "reason")})
+            and renewed_attachment.get("holder") == original_attachment.get("holder"))
+
+
+def _stock_watch_page_is_stale(store, runtime, watch, *, pending_request=None):
     """Reject a page snapshot older than the durable baseline for its watch key."""
     key = (_store_json(watch["subject"]), watch["incarnation"])
     row = next((row for row in store.stock_watch_rows(runtime)
@@ -397,8 +429,9 @@ def _stock_watch_page_is_stale(store, runtime, watch):
     if row is None:
         return False
     if row["pending"] is not None:
-        # Keep the in-flight operation pinned to its original CAS baseline.
-        return True
+        # Only an exact unresolved operation may compare an authoritative resume page.
+        if row["pending"]["request"] != pending_request:
+            return True
     current = row["watch"]
     current_revision = (current["routingRevision"],
                         current["attachment"]["leaseRevision"])
@@ -425,6 +458,8 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     if not hasattr(store, "stock_watch_rows") or not hasattr(cloud, "stock_watch"):
         return
     runtime = mapping["runtimeId"]
+
+    unresolved = {}
 
     async def recover(row):
         pending = row["pending"]
@@ -468,12 +503,25 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                     store.finish_stock_watch_request(runtime, row["watch"]["subject"],
                         row["watch"]["incarnation"], request, watch=view, failure=failure)
                     return
+                store.fail_stock_watch_request(runtime, row["watch"]["subject"],
+                    row["watch"]["incarnation"], request, "watch_changed")
+                return
             elif outcome["status"] == "conflict":
                 store.fail_stock_watch_request(runtime, row["watch"]["subject"],
                     row["watch"]["incarnation"], request, "watch_conflict")
                 return
-            # Unresolved means retry only the exact durable operation and operation ID.
-            if outcome["status"] != "unresolved":
+            elif outcome["status"] == "unresolved":
+                if outcome.get("operationId") != request.get("operationId"):
+                    store.fail_stock_watch_request(runtime, row["watch"]["subject"],
+                        row["watch"]["incarnation"], request, "watch_unavailable")
+                    return
+                if (row["watch"]["attachment"] is not None
+                        and row["watch"]["attachment"]["leaseUntil"]
+                            <= store.clock() * 1000):
+                    key = (_store_json(row["watch"]["subject"]), row["watch"]["incarnation"])
+                    unresolved[key] = (row, request)
+                    return
+            else:
                 store.fail_stock_watch_request(runtime, row["watch"]["subject"],
                     row["watch"]["incarnation"], request, "watch_changed")
                 return
@@ -617,6 +665,34 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                     store.remember_stock_watch(mapping, watch)
                 except StoreError:
                     pass
+        # Resolve unknown requests only against the complete, same-pass owner listing.
+        await asyncio.gather(*scheduled.values())
+        listed_by_key = {
+            (_store_json(watch["subject"]), watch["incarnation"]): watch for watch in listed
+        }
+        for key, (row, request) in unresolved.items():
+            projection = listed_by_key.get(key)
+            if (projection is not None
+                    and not _stock_watch_page_is_stale(
+                        store, runtime, projection, pending_request=request,
+                    )
+                    and _watch_resume_matches(
+                        row["watch"], request, projection, int(store.clock() * 1000),
+                    )
+                    and _same_stock_mapping(store, mapping, cloud)):
+                try:
+                    if store.reconcile_stock_watch_resume(
+                            runtime, row["watch"]["subject"], row["watch"]["incarnation"],
+                            request, projection):
+                        prepare_watch(projection)
+                except StoreError:
+                    # The bounded history must fit before the old CAS can be cleared.
+                    pass
+            else:
+                store.fail_stock_watch_request(
+                    runtime, row["watch"]["subject"], row["watch"]["incarnation"],
+                    request, "watch_expired" if projection is None else "watch_changed",
+                )
 def _retry_pending_stock_renewal(store, item, loop):
     """Retry a cloud-committed renewal against the current local mapping."""
     if item["leaseExpiresAt"] <= store.clock():
