@@ -309,6 +309,12 @@ Renewal stops for that exact mapping after a definitive refusal or mismatched
 response. An ambiguous transport result retries the same renewal with bounded
 backoff while the local lease remains live. This does not change global client
 configuration.
+After an expired lease, an exact unresolved readback can be reconciled only by
+a complete same-pass owner listing that proves a live higher lease revision for
+the same association, holder, source, routing, and lifecycle. The old request
+stays recorded as indeterminate, never committed; renewal resumes from the
+proven lease with a new operation ID. If bounded history or store capacity is
+full, the old request remains pending and no replacement renewal starts.
 Independent mappings renew concurrently. A request begun before lease expiry
 can finish within its five-second response bound after that old deadline.
 After a validated renewal, transient local storage failures retry the exact

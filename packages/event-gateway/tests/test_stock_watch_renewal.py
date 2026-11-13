@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from event_gateway import daemon
-from event_gateway.cloud import CloudClient, CloudError, Credentials, _iso, _stock_watch_request
+from event_gateway.cloud import (
+    CloudClient, CloudError, Credentials, _iso, _stock_watch_request, _stock_watch_view,
+)
 from event_gateway.store import Store, StoreError
 
 
@@ -1441,6 +1443,438 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual([value["operation"] for value in order], ["watch_readback", "watch_renew"])
                 self.assertEqual(order[1], request)
                 self.assertEqual(store.stock_watch_rows(RUNTIME)[0]["watch"], renewed_watch)
+
+    async def test_unresolved_old_renew_is_retained_unknown_then_higher_owner_resume_renews_new_op(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        initial = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+        resumed = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=40)
+        initial["source"].update(mappingRevision="😀" * 128, policyRevision="🚀" * 128)
+        resumed["source"] = deepcopy(initial["source"])
+        started_at = now[0]
+        old_request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                       "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                       "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                       "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                       "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                       "leaseMs": 90000}
+        operations = []
+        stop = asyncio.Event()
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, request):
+                operations.append(deepcopy(request))
+                if request["operation"] == "watch_readback":
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "unresolved", "operationId": request["operationId"]}}
+                if request["operation"] == "watch_list":
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "list", "watches": [resumed], "nextSubject": None}}
+                stop.set()
+                return {"runtime": runtime_response(local),
+                        "outcome": {"status": "committed", "operationId": request["operationId"],
+                                    "watch": {**resumed, "attachment": {
+                                        **resumed["attachment"], "leaseRevision": 39,
+                                        "leaseUntil": resumed["attachment"]["leaseUntil"] + 90000}}}}
+
+        with tempfile.TemporaryDirectory() as directory:
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
+                store.put_attachment(local)
+                store.remember_stock_watch(local, initial)
+                store.save_stock_watch_request(RUNTIME, SUBJECT, 5, old_request)
+                now[0] += 21
+            with Store(Path(directory).resolve(), clock=lambda: now[0]) as store:
+                await daemon._renew_stock_watches(store, FakeCloud(), stop, local)
+                row, = store.stock_watch_rows(RUNTIME)
+                self.assertIsNone(row["pending"])
+                self.assertEqual(row["watch"]["attachment"]["leaseRevision"], 39)
+                self.assertEqual(len(row["indeterminate"]), 1)
+                old = row["indeterminate"][0]
+                self.assertEqual(old["request"], old_request)
+                self.assertEqual(old["startedAt"], started_at)
+                self.assertEqual(old["status"], "indeterminate")
+                self.assertEqual(old["authoritativeWatch"], resumed)
+                renewals = [request for request in operations if request["operation"] == "watch_renew"]
+                self.assertEqual(len(renewals), 1)
+                self.assertNotEqual(renewals[0]["operationId"], old_request["operationId"])
+                self.assertEqual(renewals[0]["expectedLeaseRevision"], 38)
+                self.assertEqual(store.status()["stockWatchRenewal"]["indeterminate"], 1)
+
+    async def test_unresolved_resume_reconciliation_rejects_changed_identity_and_nonhigher_lease(self):
+        for change in ("lease", "holder", "source", "routing"):
+            with self.subTest(change=change):
+                now = [time.time()]
+                local = mapping(now[0])
+                initial = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+                projection = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=90)
+                if change == "lease":
+                    projection["attachment"]["leaseRevision"] = 36
+                elif change == "holder":
+                    projection["attachment"]["holder"]["runtimeGeneration"] += 1
+                elif change == "source":
+                    projection["source"]["grantRevision"] += 1
+                else:
+                    projection["routingRevision"] += 1
+                request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                           "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                           "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                           "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                           "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                           "leaseMs": 90000}
+
+                class FakeCloud:
+                    principal, agent = "owner@example.com", "codex"
+                    node_id, node_generation = NODE, 2
+
+                    async def stock_watch(self, value):
+                        if value["operation"] == "watch_readback":
+                            return {"runtime": runtime_response(local),
+                                    "outcome": {"status": "unresolved", "operationId": request["operationId"]}}
+                        if value["operation"] == "watch_list":
+                            return {"runtime": runtime_response(local),
+                                    "outcome": {"status": "list", "watches": [projection], "nextSubject": None}}
+                        raise AssertionError("unmatched listing must not start another renewal")
+
+                with tempfile.TemporaryDirectory() as directory, Store(
+                        Path(directory).resolve(), clock=lambda: now[0]) as store:
+                    store.put_attachment(local)
+                    store.remember_stock_watch(local, initial)
+                    store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+                    now[0] += 21
+                    await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+                    row, = store.stock_watch_rows(RUNTIME)
+                    self.assertEqual(row["pending"]["request"], request)
+                    self.assertFalse(row.get("indeterminate"))
+
+    async def test_unresolved_resume_history_survives_pruning_and_capacity_refuses_archive(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        initial = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+        resumed = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=90)
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                   "leaseMs": 90000}
+        next_request = {**request, "operationId": str(uuid.uuid4()),
+                        "expectedLeaseRevision": 38, "client": "codex"}
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, initial)
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            self.assertTrue(store.reconcile_stock_watch_resume(
+                RUNTIME, SUBJECT, 5, request, resumed, next_request=next_request))
+            self.assertEqual(store.prune_stock_watches(RUNTIME, set()), 0)
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(row["indeterminate"][0]["request"], request)
+            replacement = {**request, "operationId": str(uuid.uuid4())}
+            self.assertFalse(store.reconcile_stock_watch_resume(
+                RUNTIME, SUBJECT, 5, replacement, resumed, next_request=next_request))
+
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, next_request)
+            data = json.loads(store.db.execute(
+                "SELECT data FROM stock_watches WHERE runtime=?", (RUNTIME,),
+            ).fetchone()[0])
+            data["indeterminate"][0]["padding"] = "x" * 14000
+            with store.db:
+                store.db.execute("UPDATE stock_watches SET data=? WHERE runtime=?",
+                                 (json.dumps(data, sort_keys=True, separators=(",", ":")), RUNTIME))
+            too_large = watch(int(now[0] * 1000), lease_revision=39, lease_seconds=30)
+            next_next_request = {**next_request, "operationId": str(uuid.uuid4()),
+                                 "expectedLeaseRevision": 39}
+            with self.assertRaisesRegex(StoreError, "invalid_stock_watch"):
+                store.reconcile_stock_watch_resume(
+                    RUNTIME, SUBJECT, 5, next_request, too_large,
+                    next_request=next_next_request,
+                )
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(row["pending"]["request"], next_request)
+            self.assertEqual(row["watch"]["attachment"]["leaseRevision"], 38)
+            self.assertEqual(len(row["indeterminate"]), 1)
+
+    async def test_expired_unresolved_readback_timeout_does_not_archive_higher_listing(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        initial = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+        resumed = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=40)
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                   "leaseMs": 90000}
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                if value["operation"] == "watch_readback":
+                    raise TimeoutError
+                if value["operation"] == "watch_list":
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "list", "watches": [resumed], "nextSubject": None}}
+                raise AssertionError("a timeout must not authorize archive or a replacement operation")
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, initial)
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            now[0] += 21
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(row["pending"]["request"], request)
+            self.assertFalse(row.get("indeterminate"))
+            self.assertEqual(row["failure"], "watch_unavailable")
+
+    async def test_resume_mapping_drift_is_reported_as_runtime_changed(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        reassigned = {**local, "runtimeGeneration": 4,
+                      "attachmentGeneration": 5, "consumerGeneration": 5}
+        old_watch = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+        resumed_watch = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=40)
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                   "leaseMs": 90000}
+        operations = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                operations.append(value["operation"])
+                if value["operation"] == "watch_list":
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "list", "watches": [resumed_watch],
+                                        "nextSubject": None}}
+                if value["operation"] == "watch_readback":
+                    # Drift after recover's post-RPC identity check but before
+                    # the per-watch owner-resume decision.
+                    asyncio.get_running_loop().call_soon(store.put_attachment, reassigned)
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "unresolved",
+                                        "operationId": request["operationId"]}}
+                raise AssertionError("a changed runtime must not start a replacement renewal")
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, old_watch)
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            now[0] += 21
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(operations.count("watch_readback"), 1)
+            self.assertNotIn("watch_renew", operations)
+            self.assertEqual(row["pending"]["request"], request)
+            self.assertEqual(row["failure"], "runtime_changed")
+            self.assertFalse(row.get("indeterminate"))
+
+    async def test_resume_history_reserves_room_for_new_request_and_receipt(self):
+        self.assertEqual(
+            len(json.dumps(-float("1.7976931348623157e308")).encode()), 24,
+        )
+        now = [time.time()]
+        local = mapping(now[0])
+        initial = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+        resumed = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=40)
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                   "leaseMs": 90000}
+        next_request = {**request, "operationId": str(uuid.uuid4()),
+                        "expectedLeaseRevision": 38, "client": "codex"}
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, initial)
+            row, = store.stock_watch_rows(RUNTIME)
+            row["indeterminate"] = [{"status": "indeterminate", "padding": "😀" * 1257}]
+            store.db.execute("UPDATE stock_watches SET data=? WHERE runtime=?",
+                             (json.dumps(row, sort_keys=True, separators=(",", ":")), RUNTIME))
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            pending, = store.stock_watch_rows(RUNTIME)
+            pending_bytes = len(json.dumps(pending, sort_keys=True,
+                                           separators=(",", ":")).encode())
+            self.assertGreaterEqual(pending_bytes, 16 * 1024 - 128)
+            self.assertLessEqual(pending_bytes, 16 * 1024)
+            now[0] += 21
+            with self.assertRaisesRegex(StoreError, "invalid_stock_watch"):
+                store.reconcile_stock_watch_resume(
+                    RUNTIME, SUBJECT, 5, request, resumed, next_request=next_request,
+                )
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(row["pending"]["request"], request)
+            self.assertEqual(row["watch"], initial)
+            self.assertEqual(row["indeterminate"][0]["padding"], "😀" * 1257)
+
+    async def test_resume_reserve_covers_maximum_valid_watch_and_renewal_receipt(self):
+        now = [time.time()]
+        maximum = 2**53 - 1
+        local = mapping(now[0])
+        subject = {"repositoryId": maximum, "prNumber": maximum}
+        source = {"installationId": maximum, "grantRevision": maximum,
+                  "mappingRevision": "😀" * 128, "policyRevision": "🚀" * 128,
+                  "sourceIncarnation": maximum}
+        initial = watch(int(now[0] * 1000), lease_revision=maximum - 3,
+                        subject=subject, lease_seconds=20)
+        resumed = watch(int(now[0] * 1000), lease_revision=maximum - 2,
+                        subject=subject, lease_seconds=40)
+        for value in (initial, resumed):
+            value.update(incarnation=maximum, routingRevision=maximum, lifecycleEpoch=maximum,
+                         source=deepcopy(source))
+            value["attachment"]["holder"].update(
+                runtimeGeneration=maximum, attachmentGeneration=maximum,
+                nodeGeneration=maximum,
+            )
+            value["sourceControl"].update(status="acknowledged", reason="authority_unavailable")
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "client": "claude",
+                   "expectedRuntimeGeneration": maximum,
+                   "expectedAttachmentGeneration": maximum,
+                   "operationId": str(uuid.uuid4()), "subject": subject,
+                   "expectedWatchIncarnation": maximum,
+                   "expectedRoutingRevision": maximum,
+                   "expectedLeaseRevision": maximum - 3, "leaseMs": 90000}
+        next_request = {**request, "operationId": str(uuid.uuid4()),
+                        "expectedLeaseRevision": maximum - 2}
+        future_receipt = deepcopy(resumed)
+        future_receipt["attachment"].update(
+            leaseRevision=maximum - 1, leaseUntil=maximum - 1,
+        )
+        steady_request = {**next_request, "operationId": str(uuid.uuid4()),
+                          "expectedLeaseRevision": maximum - 1}
+        steady_receipt = deepcopy(resumed)
+        steady_receipt["attachment"].update(
+            leaseRevision=maximum, leaseUntil=maximum,
+        )
+        self.assertEqual(_stock_watch_request(next_request), next_request)
+        self.assertEqual(_stock_watch_request(steady_request), steady_request)
+        for value in (initial, resumed, future_receipt, steady_receipt):
+            self.assertEqual(_stock_watch_view(value), value)
+        self.assertEqual(daemon._watch_receipt_matches(resumed, future_receipt), True)
+        self.assertEqual(daemon._watch_receipt_matches(future_receipt, steady_receipt), True)
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, initial)
+            store.save_stock_watch_request(RUNTIME, subject, maximum, request)
+            now[0] += 21
+            self.assertTrue(store.reconcile_stock_watch_resume(
+                RUNTIME, subject, maximum, request, resumed, next_request=next_request))
+            archived, = store.stock_watch_rows(RUNTIME)
+            archived_bytes = len(json.dumps(archived, sort_keys=True,
+                                             separators=(",", ":")).encode())
+            self.assertLessEqual(archived_bytes, 16 * 1024)
+            store.save_stock_watch_request(RUNTIME, subject, maximum, next_request)
+            self.assertTrue(store.finish_stock_watch_request(
+                RUNTIME, subject, maximum, next_request, watch=future_receipt,
+            ))
+            store.save_stock_watch_request(RUNTIME, subject, maximum, steady_request)
+            steady_pending_bytes = len(json.dumps(
+                store.stock_watch_rows(RUNTIME)[0], sort_keys=True,
+                separators=(",", ":"),
+            ).encode())
+            self.assertTrue(store.finish_stock_watch_request(
+                RUNTIME, subject, maximum, steady_request, watch=steady_receipt,
+            ))
+            completed, = store.stock_watch_rows(RUNTIME)
+            completed_bytes = len(json.dumps(completed, sort_keys=True,
+                                              separators=(",", ":")).encode())
+            self.assertLessEqual(max(steady_pending_bytes, completed_bytes), 16 * 1024)
+
+    async def test_fast_resume_reconciles_while_unrelated_readback_is_slow(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        slow_subject = {"repositoryId": 17, "prNumber": 41}
+        resumed_subject = {"repositoryId": 17, "prNumber": 42}
+        slow_watch = watch(int(now[0] * 1000), lease_revision=6,
+                           subject=slow_subject, lease_seconds=20)
+        old_resumed_watch = watch(int(now[0] * 1000), lease_revision=37,
+                                  subject=resumed_subject, lease_seconds=20)
+        resumed_watch = watch(int(now[0] * 1000), lease_revision=38,
+                              subject=resumed_subject, lease_seconds=40)
+
+        def request_for(watch_value):
+            return {"operation": "watch_renew", "runtimeId": RUNTIME,
+                    "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                    "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                    "subject": watch_value["subject"],
+                    "expectedWatchIncarnation": watch_value["incarnation"],
+                    "expectedRoutingRevision": watch_value["routingRevision"],
+                    "expectedLeaseRevision": watch_value["attachment"]["leaseRevision"],
+                    "leaseMs": 90000}
+
+        slow_request, old_request = request_for(slow_watch), request_for(old_resumed_watch)
+        slow_readback, release_slow, new_renewal = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                if value["operation"] == "watch_list":
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "list",
+                                        "watches": [slow_watch, resumed_watch],
+                                        "nextSubject": None}}
+                if value["operation"] == "watch_readback":
+                    if value["operationId"] == slow_request["operationId"]:
+                        slow_readback.set()
+                        await release_slow.wait()
+                        return {"runtime": runtime_response(local),
+                                "outcome": {"status": "unresolved",
+                                            "operationId": slow_request["operationId"]}}
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "unresolved",
+                                        "operationId": value["operationId"]}}
+                if (value["operation"] == "watch_renew"
+                        and value["expectedLeaseRevision"] == 38):
+                    new_renewal.set()
+                    renewed = {**resumed_watch, "attachment": {
+                        **resumed_watch["attachment"], "leaseRevision": 39,
+                        "leaseUntil": resumed_watch["attachment"]["leaseUntil"] + 90000}}
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "committed",
+                                        "operationId": value["operationId"], "watch": renewed}}
+                raise AssertionError("unrelated expired request must not be replayed")
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, slow_watch)
+            store.save_stock_watch_request(RUNTIME, slow_subject, 5, slow_request)
+            store.remember_stock_watch(local, old_resumed_watch)
+            store.save_stock_watch_request(RUNTIME, resumed_subject, 5, old_request)
+            now[0] += 21
+            worker = asyncio.create_task(daemon._renew_stock_watches(
+                store, FakeCloud(), asyncio.Event(), local,
+            ))
+            try:
+                await asyncio.wait_for(slow_readback.wait(), 1)
+                await asyncio.wait_for(new_renewal.wait(), 1)
+                self.assertFalse(release_slow.is_set())
+                resumed_row = next(row for row in store.stock_watch_rows(RUNTIME)
+                                   if row["watch"]["subject"] == resumed_subject)
+                self.assertEqual(resumed_row["watch"]["attachment"]["leaseRevision"], 39)
+                self.assertEqual(resumed_row["indeterminate"][0]["request"], old_request)
+            finally:
+                release_slow.set()
+                await asyncio.wait_for(worker, 2)
+
 
     async def test_pending_receipt_ignores_source_control_health_but_pins_identity(self):
         for identity_change in (None, "operationId", "obligationId", "mode"):
