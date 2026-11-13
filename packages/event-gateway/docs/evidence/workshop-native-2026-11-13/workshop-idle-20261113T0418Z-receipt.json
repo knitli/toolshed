@@ -1,0 +1,45 @@
+{
+  "kind": "workshop-idle-bounded-trial-receipt-v1",
+  "at": "2026-11-13T04:22:07.532427+00:00",
+  "status": "idle-canonical-read-passed",
+  "boundedIdlePassed": true,
+  "fullClientQualified": false,
+  "workspace": "985ea982d814f7a6a42166199748ae579e1d37c30f547776cf848e1aa6dc57bf",
+  "agent": "event-workshop-canary",
+  "requestId": "TwtdST3HoIGCGO9R9gywbA",
+  "orderId": "d20429e0f93bc147b865977848d6916d0c2f7ab4f6441ef88c8adae4298d6329",
+  "signedAt": "2026-11-13T04:18:56Z",
+  "stoppedBy": "2026-11-13T04:19:50Z",
+  "callback": {
+    "id": "458ccce5-4546-4693-a749-157abfb6f281",
+    "from": "adam@knitli.com",
+    "argsVariable": "messageArrived_ARGS_3"
+  },
+  "observedToolOutput": {
+    "id": "458ccce5-4546-4693-a749-157abfb6f281",
+    "taskType": "workshop-qualification/v1",
+    "note": "WORKSHOP_IDLE_20261113T0412Z_398bc619",
+    "status": "read",
+    "verified": true,
+    "receiptDigest": "d8416b65ef1440634aebd904e0cdb673771301146ad06af37ad6b1c0911adf58",
+    "chainLength": 1
+  },
+  "exactCanonicalReadCallsObserved": 1,
+  "successAckEmitted": "WORKSHOP_IDLE_ACK",
+  "stopObserved": true,
+  "modelTurnLimitSeconds": 120,
+  "cleanup": {
+    "hookPersistedOffVerifiedByReload": true,
+    "orderRevokedVerified": true
+  },
+  "uiTotalsAfter": {
+    "tokens": 19453,
+    "costUsd": 0.0746
+  },
+  "notClaimed": [
+    "full E5 qualification",
+    "busy behavior",
+    "task completion",
+    "legacy native admission or Event Runtime turn-start ACK"
+  ]
+}
