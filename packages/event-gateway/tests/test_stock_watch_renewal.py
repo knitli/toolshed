@@ -1633,6 +1633,54 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(row.get("indeterminate"))
             self.assertEqual(row["failure"], "watch_unavailable")
 
+    async def test_resume_mapping_drift_is_reported_as_runtime_changed(self):
+        now = [time.time()]
+        local = mapping(now[0])
+        reassigned = {**local, "runtimeGeneration": 4,
+                      "attachmentGeneration": 5, "consumerGeneration": 5}
+        old_watch = watch(int(now[0] * 1000), lease_revision=37, lease_seconds=20)
+        resumed_watch = watch(int(now[0] * 1000), lease_revision=38, lease_seconds=40)
+        request = {"operation": "watch_renew", "runtimeId": RUNTIME,
+                   "conversationId": CONVERSATION, "expectedRuntimeGeneration": 3,
+                   "expectedAttachmentGeneration": 4, "operationId": str(uuid.uuid4()),
+                   "subject": SUBJECT, "expectedWatchIncarnation": 5,
+                   "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
+                   "leaseMs": 90000}
+        operations = []
+
+        class FakeCloud:
+            principal, agent = "owner@example.com", "codex"
+            node_id, node_generation = NODE, 2
+
+            async def stock_watch(self, value):
+                operations.append(value["operation"])
+                if value["operation"] == "watch_list":
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "list", "watches": [resumed_watch],
+                                        "nextSubject": None}}
+                if value["operation"] == "watch_readback":
+                    # Drift after recover's post-RPC identity check but before
+                    # the per-watch owner-resume decision.
+                    asyncio.get_running_loop().call_soon(store.put_attachment, reassigned)
+                    return {"runtime": runtime_response(local),
+                            "outcome": {"status": "unresolved",
+                                        "operationId": request["operationId"]}}
+                raise AssertionError("a changed runtime must not start a replacement renewal")
+
+        with tempfile.TemporaryDirectory() as directory, Store(
+                Path(directory).resolve(), clock=lambda: now[0]) as store:
+            store.put_attachment(local)
+            store.remember_stock_watch(local, old_watch)
+            store.save_stock_watch_request(RUNTIME, SUBJECT, 5, request)
+            now[0] += 21
+            await daemon._renew_stock_watches(store, FakeCloud(), asyncio.Event(), local)
+            row, = store.stock_watch_rows(RUNTIME)
+            self.assertEqual(operations.count("watch_readback"), 1)
+            self.assertNotIn("watch_renew", operations)
+            self.assertEqual(row["pending"]["request"], request)
+            self.assertEqual(row["failure"], "runtime_changed")
+            self.assertFalse(row.get("indeterminate"))
+
     async def test_resume_history_reserves_room_for_new_request_and_receipt(self):
         self.assertEqual(
             len(json.dumps(-float("1.7976931348623157e308")).encode()), 24,

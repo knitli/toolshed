@@ -486,6 +486,7 @@ class Store:
             if key in current_keys:
                 continue
             pending = data["pending"]
+            # shortcut: retained history shares the 32-row quota; audited retirement is needed for broader use.
             if pending is None and not data.get("indeterminate"):
                 remove.append((runtime, row[0], row[1]))
         if remove:

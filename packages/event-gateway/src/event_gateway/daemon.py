@@ -680,28 +680,33 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                 return
             row, request = candidate
             projection = listed_by_key.get(key)
-            if (projection is not None
-                    and not _stock_watch_page_is_stale(
-                        store, runtime, projection, pending_request=request,
-                    )
-                    and _watch_resume_matches(
-                        row["watch"], request, projection, int(store.clock() * 1000),
-                    )
-                    and _same_stock_mapping(store, mapping, cloud)):
-                try:
-                    next_request = _watch_request(mapping, "watch_renew", watch=projection)
-                    if store.reconcile_stock_watch_resume(
-                            runtime, row["watch"]["subject"], row["watch"]["incarnation"],
-                            request, projection, next_request=next_request):
-                        prepare_watch(projection, request=next_request)
-                except StoreError:
-                    # The bounded history must fit before the old CAS can be cleared.
-                    pass
+            if projection is None:
+                failure = "watch_expired"
+            elif (_stock_watch_page_is_stale(
+                      store, runtime, projection, pending_request=request,
+                  ) or not _watch_resume_matches(
+                      row["watch"], request, projection, int(store.clock() * 1000),
+                  )):
+                failure = "watch_changed"
+            elif not _same_stock_mapping(store, mapping, cloud):
+                failure = "runtime_changed"
             else:
+                failure = None
+            if failure is not None:
                 store.fail_stock_watch_request(
                     runtime, row["watch"]["subject"], row["watch"]["incarnation"],
-                    request, "watch_expired" if projection is None else "watch_changed",
+                    request, failure,
                 )
+                return
+            try:
+                next_request = _watch_request(mapping, "watch_renew", watch=projection)
+                if store.reconcile_stock_watch_resume(
+                        runtime, row["watch"]["subject"], row["watch"]["incarnation"],
+                        request, projection, next_request=next_request):
+                    prepare_watch(projection, request=next_request)
+            except StoreError:
+                # The bounded history must fit before the old CAS can be cleared.
+                pass
 
         for row in pending_rows:
             tasks.create_task(reconcile_pending(row))
