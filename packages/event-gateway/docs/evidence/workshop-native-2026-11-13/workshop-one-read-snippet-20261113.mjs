@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { runInNewContext } from "node:vm";
 
 const NOTE = "WORKSHOP_IDLE_20261113T0412Z_398bc619", PLACEHOLDER = "PLACEHOLDER_EXACT_CALLBACK_ID";
 function check(r, id, digest) {
@@ -33,6 +32,9 @@ function renderWorkshopSnippet() {
     `const NOTE = ${JSON.stringify(NOTE)}, PLACEHOLDER = ${JSON.stringify(PLACEHOLDER)};`,
     check.toString(),
     executeCode.toString(),
+    "export default async function(self, env, ctx) {",
+    "  return executeCode(env);",
+    "}",
   ].join("\n\n");
 }
 function receiptIsValid(r, trial) {
@@ -55,16 +57,23 @@ async function selfCheck() {
   a(receiptIsValid(idleReceipt, "idle"), "idle receipt fields");
   a(receiptIsValid(busyReceipt, "busy"), "busy receipt fields");
   a(!receiptIsValid({ ...busyReceipt, boundedBusyPassed: false }, "busy"), "mutated busy receipt rejected");
-  const { executeCode: emittedExecuteCode, check: emittedCheck } = runInNewContext(`${renderWorkshopSnippet()}\n({ executeCode, check });`);
+  const moduleSource = `${renderWorkshopSnippet()}\nexport { check };`.replaceAll(PLACEHOLDER, id);
+  const { default: emittedEntry, check: emittedCheck } = await import(`data:text/javascript;base64,${Buffer.from(moduleSource).toString("base64")}`);
   const good = { id, taskType:"workshop-qualification/v1", body:JSON.stringify({fields:{note:NOTE}}), status:"read", provenance:{verified:{authentic:true,reasons:[]},receiptDigest:"a".repeat(64),chain:["receipt"]} };
-  const run = async r => { let n=0; const out=[]; let err; try { await emittedExecuteCode({MESSAGING:{read:async x=>{n++;a(x===id,"read id");return r;}}},id,x=>out.push(x)); } catch(e) { err=String(e); } return {n,out,err}; };
-  const green=await run(good); a(green.n===1&&!green.err&&green.out.at(-1)==="WORKSHOP_IDLE_ACK","emitted snippet valid/read once");
+  const run = async r => {
+    let n=0; const out=[]; let err; const originalLog=console.log; console.log=value=>out.push(value);
+    try { await emittedEntry(null,{MESSAGING:{read:async x=>{n++;a(x===id,"read id");return r;}}},null); }
+    catch(e) { err=String(e); }
+    finally { console.log=originalLog; }
+    return {n,out,err};
+  };
+  const green=await run(good); a(green.n===1&&!green.err&&green.out.at(-1)==="WORKSHOP_IDLE_ACK","emitted module entry valid/read once");
   a(emittedCheck(good,id,good.provenance.verified.receiptDigest).errors.includes("receiptDigest-hex"),"old nested-path mutant red");
   a(!emittedCheck(good,id,good.provenance.receiptDigest).errors.length,"restored sibling path green");
   for (const [key,value] of [["id","wrong"],["note","wrong"],["authentic",false]]) {
     const bad=structuredClone(good); if(key==="id") bad.id=value; if(key==="note") bad.body=JSON.stringify({fields:{note:value}}); if(key==="authentic") bad.provenance.verified.authentic=value;
     const x=await run(bad); a(x.n===1&&!!x.err&&!x.out.includes("WORKSHOP_IDLE_ACK"),`${key} rejects/read once`);
   }
-  console.log("SELF_CHECK_PASS: emitted snippet dependencies and one-read ACK; digest-path red/green; id/note/authentic rejects; idle/busy receipt validation and mutant red");
+  console.log("SELF_CHECK_PASS: exported Workshop module entry/one-read ACK; digest-path red/green; id/note/authentic rejects; idle/busy receipt validation and mutant red");
 }
 if (process.argv[2] === "--self-check") await selfCheck(); else console.log(renderWorkshopSnippet());
