@@ -1608,6 +1608,7 @@ class StockWatchRenewalTests(unittest.IsolatedAsyncioTestCase):
                    "subject": SUBJECT, "expectedWatchIncarnation": 5,
                    "expectedRoutingRevision": 7, "expectedLeaseRevision": 37,
                    "leaseMs": 90000}
+
         class FakeCloud:
             principal, agent = "owner@example.com", "codex"
             node_id, node_generation = NODE, 2
