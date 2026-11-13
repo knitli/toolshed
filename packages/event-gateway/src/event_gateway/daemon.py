@@ -572,7 +572,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
     scheduled = {}
 
     async with _expected_stock_watch_task_group() as tasks:
-        def prepare_watch(watch):
+        def prepare_watch(watch, *, request=None):
             if _stock_watch_page_is_stale(store, runtime, watch):
                 return True
             expires = watch["attachment"]["leaseUntil"]
@@ -586,7 +586,7 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                 if error.code == "capacity":
                     return False
                 return True
-            request = _watch_request(mapping, "watch_renew", watch=watch)
+            request = request or _watch_request(mapping, "watch_renew", watch=watch)
             try:
                 store.save_stock_watch_request(
                     runtime, watch["subject"], watch["incarnation"], request,
@@ -665,12 +665,20 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                     store.remember_stock_watch(mapping, watch)
                 except StoreError:
                     pass
-        # Resolve unknown requests only against the complete, same-pass owner listing.
-        await asyncio.gather(*scheduled.values())
+        # Resolve each unknown request independently after the complete owner listing.
         listed_by_key = {
             (_store_json(watch["subject"]), watch["incarnation"]): watch for watch in listed
         }
-        for key, (row, request) in unresolved.items():
+
+        async def reconcile_pending(row):
+            key = (_store_json(row["watch"]["subject"]), row["watch"]["incarnation"])
+            recovery = scheduled.get(key)
+            if recovery is not None:
+                await recovery
+            candidate = unresolved.get(key)
+            if candidate is None:
+                return
+            row, request = candidate
             projection = listed_by_key.get(key)
             if (projection is not None
                     and not _stock_watch_page_is_stale(
@@ -681,10 +689,11 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                     )
                     and _same_stock_mapping(store, mapping, cloud)):
                 try:
+                    next_request = _watch_request(mapping, "watch_renew", watch=projection)
                     if store.reconcile_stock_watch_resume(
                             runtime, row["watch"]["subject"], row["watch"]["incarnation"],
-                            request, projection):
-                        prepare_watch(projection)
+                            request, projection, next_request=next_request):
+                        prepare_watch(projection, request=next_request)
                 except StoreError:
                     # The bounded history must fit before the old CAS can be cleared.
                     pass
@@ -693,6 +702,9 @@ async def _renew_stock_watches(store, cloud, stop, mapping):  # noqa: MC0001
                     runtime, row["watch"]["subject"], row["watch"]["incarnation"],
                     request, "watch_expired" if projection is None else "watch_changed",
                 )
+
+        for row in pending_rows:
+            tasks.create_task(reconcile_pending(row))
 def _retry_pending_stock_renewal(store, item, loop):
     """Retry a cloud-committed renewal against the current local mapping."""
     if item["leaseExpiresAt"] <= store.clock():

@@ -35,6 +35,7 @@ RETENTION = 7 * 86400
 CLAIM_RESERVE = 262144
 RETRYABLE_CLAIM_REFUSALS = ("conflict", "capacity", "coordinator_capacity", "native_binding_unqualified")
 MESSAGING_METADATA = ("routingGeneration", "namespace", "agentIncarnation")
+_STOCK_WATCH_ROW_BYTES = 16 * 1024
 
 
 def _json(value):
@@ -424,7 +425,7 @@ class Store:
         value.setdefault("indeterminate", [])
         if value["pending"] is None:
             value["watch"] = watch
-        if len(_json(value).encode()) > 16384:
+        if len(_json(value).encode()) > _STOCK_WATCH_ROW_BYTES:
             raise StoreError("invalid_stock_watch")
         try:
             self._capacity(32768 + len(_json(value).encode()) * 3)
@@ -461,12 +462,15 @@ class Store:
             return value["pending"]
         pending = {"request": request, "startedAt": self.clock()}
         value.update(pending=pending, failure=None)
+        encoded = _json(value)
+        if len(encoded.encode()) > _STOCK_WATCH_ROW_BYTES:
+            raise StoreError("invalid_stock_watch")
         try:
-            self._capacity(32768 + len(_json(value).encode()) * 3)
+            self._capacity(32768 + len(encoded.encode()) * 3)
             with self.db:
                 self.db.execute(
                     "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
-                    (_json(value), self.clock(), runtime, key, incarnation),
+                    (encoded, self.clock(), runtime, key, incarnation),
                 )
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
@@ -513,18 +517,22 @@ class Store:
         value.update(pending=None, failure=failure,
                      receipt={"operationId": request.get("operationId"),
                               "request": request, "watch": watch} if watch is not None else None)
+        encoded = _json(value)
+        if len(encoded.encode()) > _STOCK_WATCH_ROW_BYTES:
+            raise StoreError("invalid_stock_watch")
         try:
-            self._capacity(32768 + len(_json(value).encode()) * 3)
+            self._capacity(32768 + len(encoded.encode()) * 3)
             with self.db:
                 self.db.execute(
                     "UPDATE stock_watches SET data=?,updated=? WHERE runtime=? AND subject=? AND incarnation=?",
-                    (_json(value), self.clock(), runtime, key, incarnation),
+                    (encoded, self.clock(), runtime, key, incarnation),
                 )
             return True
         except sqlite3.Error:
             raise StoreError("storage_unavailable") from None
 
-    def reconcile_stock_watch_resume(self, runtime, subject, incarnation, request, watch):
+    def reconcile_stock_watch_resume(self, runtime, subject, incarnation, request, watch,
+                                     *, next_request):
         """Archive an unresolved CAS only beside its exact higher-lease owner proof."""
         key = _json(subject)
         row = self.db.execute(
@@ -540,6 +548,34 @@ class Store:
         if (watch.get("subject") != subject or watch.get("incarnation") != incarnation
                 or watch.get("state") != "attached" or watch.get("attachment") is None):
             return False
+        from .cloud import CloudError, _stock_watch_request
+
+        try:
+            _stock_watch_request(next_request)
+        except (CloudError, TypeError, ValueError):
+            raise StoreError("invalid_stock_watch") from None
+        baseline = value.get("watch", {})
+        baseline_attachment = baseline.get("attachment") or {}
+        if (request.get("operation") != "watch_renew"
+                or request.get("runtimeId") != runtime
+                or request.get("subject") != subject
+                or request.get("expectedWatchIncarnation") != incarnation
+                or request.get("expectedRoutingRevision") != baseline.get("routingRevision")
+                or request.get("expectedLeaseRevision")
+                    != baseline_attachment.get("leaseRevision")
+                or next_request.get("operation") != "watch_renew"
+                or next_request.get("operationId") == request.get("operationId")
+                or next_request.get("runtimeId") != runtime
+                or next_request.get("subject") != subject
+                or next_request.get("expectedWatchIncarnation") != incarnation
+                or next_request.get("expectedRoutingRevision") != watch.get("routingRevision")
+                or next_request.get("expectedLeaseRevision")
+                    != watch["attachment"].get("leaseRevision")
+                or any(next_request.get(key) != request.get(key) for key in (
+                    "conversationId", "expectedRuntimeGeneration", "expectedAttachmentGeneration",
+                ))
+                or next_request.get("client", "codex") != request.get("client", "codex")):
+            raise StoreError("invalid_stock_watch")
         history = value.setdefault("indeterminate", [])
         history.append({
             "request": request, "startedAt": pending["startedAt"],
@@ -548,7 +584,65 @@ class Store:
         })
         value.update(watch=watch, pending=None, failure=None, receipt=None)
         encoded = _json(value)
-        if len(encoded.encode()) > 16384:
+        max_integer = 2**53 - 1
+        current_revision = watch["attachment"]["leaseRevision"]
+        first_revision = min(current_revision + 1, max_integer)
+        first_watch = json.loads(_json(watch))
+        first_watch["attachment"].update(
+            leaseRevision=first_revision,
+            leaseUntil=max_integer,
+        )
+        first_watch["sourceControl"].update(
+            status="acknowledged", reason="authority_unavailable",
+        )
+        first_receipt = {
+            "operationId": next_request["operationId"],
+            "request": next_request, "watch": first_watch,
+        }
+        # Current timestamps are shorter than a finite float's JSON
+        # representation; use the widest form for the row budget.
+        started_at = -float("1.7976931348623157e308")
+        states = [
+            dict(value, pending={"request": next_request, "startedAt": started_at}),
+            dict(value, watch=first_watch, pending=None, failure=None, receipt=first_receipt),
+        ]
+        if first_revision < max_integer:
+            prior_request_id = "eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee"
+            next_request_id = "ffffffff-ffff-4fff-bfff-ffffffffffff"
+            prior_request = dict(
+                next_request, operationId=prior_request_id,
+                expectedLeaseRevision=max_integer - 2,
+            )
+            steady_request = dict(
+                next_request, operationId=next_request_id,
+                expectedLeaseRevision=max_integer - 1,
+            )
+            steady_prior_watch = json.loads(_json(first_watch))
+            steady_prior_watch["attachment"].update(
+                leaseRevision=max_integer - 1,
+                leaseUntil=max_integer - 1,
+            )
+            steady_prior_receipt = {
+                "operationId": prior_request["operationId"],
+                "request": prior_request, "watch": steady_prior_watch,
+            }
+            steady_watch = json.loads(_json(first_watch))
+            steady_watch["attachment"].update(
+                leaseRevision=max_integer,
+                leaseUntil=max_integer,
+            )
+            steady_receipt = {
+                "operationId": steady_request["operationId"],
+                "request": steady_request, "watch": steady_watch,
+            }
+            states.extend((
+                dict(value, watch=steady_prior_watch,
+                     pending={"request": steady_request, "startedAt": started_at},
+                     failure=None, receipt=steady_prior_receipt),
+                dict(value, watch=steady_watch, pending=None, failure=None,
+                     receipt=steady_receipt),
+            ))
+        if max(len(_json(state).encode()) for state in states) > _STOCK_WATCH_ROW_BYTES:
             raise StoreError("invalid_stock_watch")
         try:
             self._capacity(32768 + len(encoded.encode()) * 3)
