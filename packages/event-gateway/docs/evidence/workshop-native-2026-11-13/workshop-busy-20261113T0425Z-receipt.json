@@ -1,0 +1,54 @@
+{
+  "kind": "workshop-busy-bounded-trial-receipt-v1",
+  "at": "2026-11-13T04:29:06.378185+00:00",
+  "status": "busy-work-unchanged-and-deferred-canonical-read-passed",
+  "boundedBusyPassed": true,
+  "fullRolloutQualified": false,
+  "workspace": "985ea982d814f7a6a42166199748ae579e1d37c30f547776cf848e1aa6dc57bf",
+  "agent": "event-workshop-canary",
+  "requestId": "vNfJmCQxUgtfDa2FRtuP1A",
+  "orderId": "ae59646c5cb3062b4b007a970d04a75109cba0dcfc820b3b19445728eca8b87b",
+  "signedAt": "2026-11-13T04:25:56Z",
+  "original": {
+    "beginEpochMs": 1794543936115,
+    "doneEpochMs": 1794543996115,
+    "durationMs": 60000,
+    "onlyExecuteCodeCallsObserved": 1,
+    "canonicalReadsObserved": 0,
+    "completedUnchanged": true,
+    "runningAfterSignedObserved": true
+  },
+  "callback": {
+    "id": "038bcb07-8679-4ede-81e6-6523771f4b8e",
+    "from": "adam@knitli.com",
+    "argsVariable": "messageArrived_ARGS_4",
+    "appearedAfterOriginalFinished": true,
+    "exactCanonicalReadCallsObserved": 1,
+    "stoppedBy": "2026-11-13T04:27:15Z"
+  },
+  "observedToolOutput": {
+    "id": "038bcb07-8679-4ede-81e6-6523771f4b8e",
+    "taskType": "workshop-qualification/v1",
+    "note": "WORKSHOP_BUSY_20261113_a8e71423",
+    "status": "read",
+    "verified": true,
+    "receiptDigest": "98201db75881d87bd1fb8b64d3247156179308d2cc72d55b49257a0bd7f8ab37",
+    "chainLength": 1
+  },
+  "successAckEmitted": "WORKSHOP_BUSY_ACK",
+  "modelTurnLimitSecondsEach": 120,
+  "cleanup": {
+    "hookPersistedOffVerifiedByReload": true,
+    "orderRevokedVerified": true
+  },
+  "uiTotalsAfter": {
+    "tokens": 20998,
+    "costUsd": 0.0986
+  },
+  "notClaimed": [
+    "task completion",
+    "legacy native admission or Event Runtime lifecycle ACK",
+    "unattended host-offline autonomy",
+    "general rollout or load qualification"
+  ]
+}
