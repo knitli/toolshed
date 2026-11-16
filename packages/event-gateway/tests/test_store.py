@@ -457,6 +457,39 @@ class StoreTests(unittest.TestCase):
         self.store.record_admission(ident, self.admission())
         self.assertEqual(self.store.get(ident)["status"], "admitted")
 
+    def test_retryable_claim_refusal_is_backed_off_across_restart(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        attempt = self.event["attemptId"]
+        self.store.begin_claim(ident)
+        self.store.note_claim_refusal(ident, attempt, "conflict", uncertain=False)
+        self.assertEqual(self.store.list_reconcilable(), [])
+        self.now -= 3600
+        self.assertEqual(self.store.list_reconcilable(), [])
+
+        self.store.close()
+        self.store = Store(self.path, clock=self.clock)
+        self.assertEqual(self.store.list_reconcilable(), [])
+        self.now = NOW + 30
+        self.assertEqual([row["deliveryId"] for row in self.store.list_reconcilable()], [ident])
+
+    def test_over_budget_claim_refusal_uses_retry_backoff(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        attempt = self.event["attemptId"]
+        self.store.begin_claim(ident)
+        self.store.note_claim_refusal(ident, attempt, "over_budget", uncertain=True)
+        self.assertEqual(self.store.list_reconcilable(), [])
+        self.now += 30
+        self.assertEqual([row["deliveryId"] for row in self.store.list_reconcilable()], [ident])
+
+    def test_unknown_claim_outcome_remains_immediately_reconcilable(self):
+        ident = self.store.accept(self.event)["deliveryId"]
+        self.store.begin_claim(ident)
+        self.store.note_claim_request(ident, self.event["attemptId"])
+        self.assertEqual([row["deliveryId"] for row in self.store.list_reconcilable()], [ident])
+        attempt = self.store.current_attempt(ident)
+        self.assertEqual(attempt["claim_uncertain"], 1)
+        self.assertEqual(self.store.get(ident)["status"], "claiming")
+
     def test_reject_claim_releases_capacity_and_retains_dedup_after_restart(self):
         self.store.max_rows = 1
         ident = self.store.accept(self.event)["deliveryId"]

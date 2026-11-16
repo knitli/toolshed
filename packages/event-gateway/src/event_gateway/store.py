@@ -34,6 +34,7 @@ IDENTITY = (
 RETENTION = 7 * 86400
 CLAIM_RESERVE = 262144
 RETRYABLE_CLAIM_REFUSALS = ("conflict", "capacity", "coordinator_capacity", "native_binding_unqualified")
+CLAIM_RETRY_BACKOFF = 30
 MESSAGING_METADATA = ("routingGeneration", "namespace", "agentIncarnation")
 _STOCK_WATCH_ROW_BYTES = 16 * 1024
 
@@ -2421,15 +2422,21 @@ class Store:
         ]
 
     def list_reconcilable(self):
+        retry_reasons = (*RETRYABLE_CLAIM_REFUSALS, "over_budget")
+        placeholders = ",".join("?" for _ in retry_reasons)
+        now = self.clock()
+        retry_cutoff = now - CLAIM_RETRY_BACKOFF if math.isfinite(now) else float("-inf")
         return [
             self._public(row)
             for row in self.db.execute(
-                "SELECT * FROM deliveries WHERE (state IN "
+                "SELECT * FROM deliveries WHERE NOT (state='claiming' "
+                f"AND COALESCE(reason,'') IN ({placeholders}) AND updated > ?) AND (state IN "
                 "('claiming','admitted','settlement_pending','submitted','ambiguous') "
                 "OR (state='observed' AND ack_state IS NOT state) "
                 "OR (state='command_accepted' AND ack_state IS NOT state) "
                 "OR (state='client_reported' AND ack_state IS NOT state)) "
-                "ORDER BY created,id"
+                "ORDER BY created,id",
+                (*retry_reasons, retry_cutoff),
             )
             if (envelope := json.loads(row["envelope"])).get("schemaVersion") == 1
             or _assigned_stock_v2(envelope)
