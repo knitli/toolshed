@@ -936,9 +936,12 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
 
         cloud = FakeCloud()
         asyncio.get_running_loop().call_later(0.01, stop.set)
-        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001):
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001), \
+                self.assertLogs(daemon.logger, level="WARNING") as captured:
             await asyncio.wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
         self.assertEqual(cloud.calls, 1)
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("local_mapping_changed", captured.output[0])
 
     async def test_pending_local_cas_refusal_suspends_unchanged_mapping(self):
         mapping = {
@@ -1164,9 +1167,224 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
                 raise CloudError("assigned_stock_disabled")
 
         cloud = FakeCloud()
-        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001):
+        with patch.object(daemon, "STOCK_RENEW_INTERVAL", 0.001), \
+                self.assertLogs(daemon.logger, level="WARNING") as captured:
             await asyncio.wait_for(daemon._stock_renewal_worker(FakeStore(), cloud, stop), 1)
         self.assertEqual(cloud.calls, 1)
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("cloud_suspended", captured.output[0])
+        self.assertIn("cloud_code=assigned_stock_disabled", captured.output[0])
+
+    async def test_stock_renewal_exhausted_ambiguous_retries_log_only_safe_context(self):
+        now = time.time()
+        mapping = {
+            "runtimeId": "00000000-0000-4000-8000-000000000001",
+            "runtimeGeneration": 4, "attachmentGeneration": 7,
+            "leaseExpiresAt": now + 90,
+            "runtimeProfile": {"client": "codex", "conversationId": str(uuid.uuid4())},
+        }
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return now
+
+        class FakeCloud:
+            calls = 0
+
+            async def assigned_stock(self, _request):
+                self.calls += 1
+                raise CloudError("secret-response-content", ambiguous=True)
+
+        cloud, suspended = FakeCloud(), set()
+        real_wait_for = asyncio.wait_for
+
+        async def fast_retry_wait(awaitable, timeout):
+            return await real_wait_for(awaitable, 0.001 if timeout <= 2 else timeout)
+
+        with patch.object(daemon.asyncio, "wait_for", side_effect=fast_retry_wait), \
+                self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(
+                FakeStore(), cloud, asyncio.Event(), mapping, suspended,
+            )
+
+        self.assertIsNone(result)
+        self.assertEqual(cloud.calls, 3)
+        self.assertEqual(suspended, set())
+        self.assertEqual(len(captured.records), 1)
+        output = "\n".join(captured.output)
+        self.assertIn("ambiguous_retries_exhausted", output)
+        self.assertIn(mapping["runtimeId"], output)
+        self.assertIn("runtime_generation=4", output)
+        self.assertIn("attachment_generation=7", output)
+        self.assertIn("cloud_code=other", output)
+        self.assertNotIn("secret-response-content", output)
+        self.assertNotIn("leaseExpiresAt", output)
+
+    async def test_stock_renewal_expired_before_request_logs_without_cloud_call(self):
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": 10,
+            "runtimeProfile": {"client": "codex", "conversationId": str(uuid.uuid4())},
+        }
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return 11
+
+        class FakeCloud:
+            calls = 0
+
+            async def assigned_stock(self, _request):
+                self.calls += 1
+                raise AssertionError("expired lease must not be renewed")
+
+        cloud = FakeCloud()
+        with self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(
+                FakeStore(), cloud, asyncio.Event(), mapping, set(),
+            )
+        self.assertIsNone(result)
+        self.assertEqual(cloud.calls, 0)
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("lease_expired_before_request", captured.output[0])
+
+    async def test_stock_renewal_suspends_on_conflict_with_closed_code(self):
+        now = time.time()
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": now + 90,
+            "runtimeProfile": {"client": "codex", "conversationId": str(uuid.uuid4())},
+        }
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return now
+
+        class FakeCloud:
+            calls = 0
+
+            async def assigned_stock(self, _request):
+                self.calls += 1
+                raise CloudError("conflict")
+
+        cloud, suspended = FakeCloud(), set()
+        with self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(
+                FakeStore(), cloud, asyncio.Event(), mapping, suspended,
+            )
+        self.assertIsNone(result)
+        self.assertEqual(cloud.calls, 1)
+        self.assertEqual(len(suspended), 1)
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("cloud_suspended", captured.output[0])
+        self.assertIn("cloud_code=conflict", captured.output[0])
+
+    async def test_stock_renewal_logs_owner_interaction_code_without_error_text(self):
+        now = time.time()
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": now + 90,
+            "runtimeProfile": {"client": "codex", "conversationId": str(uuid.uuid4())},
+        }
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return now
+
+        class FakeOwnerInteractionError(CloudError):
+            def __str__(self):
+                return "response-body-secret"
+
+        class FakeCloud:
+            calls = 0
+
+            async def assigned_stock(self, _request):
+                self.calls += 1
+                raise FakeOwnerInteractionError("owner_interaction_required")
+
+        cloud, suspended = FakeCloud(), set()
+        with self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(
+                FakeStore(), cloud, asyncio.Event(), mapping, suspended,
+            )
+        self.assertIsNone(result)
+        self.assertEqual(cloud.calls, 1)
+        self.assertEqual(len(suspended), 1)
+        self.assertEqual(len(captured.records), 1)
+        self.assertNotIn("response-body-secret", captured.output[0])
+        self.assertIn("cloud_code=owner_interaction_required", captured.output[0])
+
+    async def test_stock_renewal_timeout_exhaustion_logs_request_timeout(self):
+        now = time.time()
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": now + 90,
+            "runtimeProfile": {"client": "codex", "conversationId": str(uuid.uuid4())},
+        }
+
+        class FakeStore:
+            @staticmethod
+            def clock():
+                return now
+
+        class FakeCloud:
+            calls = 0
+
+            async def assigned_stock(self, _request):
+                self.calls += 1
+                raise TimeoutError
+
+        cloud = FakeCloud()
+        real_wait_for = asyncio.wait_for
+
+        async def fast_retry_wait(awaitable, timeout):
+            return await real_wait_for(awaitable, 0.001 if timeout <= 2 else timeout)
+
+        with patch.object(daemon.asyncio, "wait_for", side_effect=fast_retry_wait), \
+                self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(
+                FakeStore(), cloud, asyncio.Event(), mapping, set(),
+            )
+        self.assertIsNone(result)
+        self.assertEqual(cloud.calls, 3)
+        self.assertEqual(len(captured.records), 1)
+        self.assertIn("ambiguous_retries_exhausted", captured.output[0])
+        self.assertIn("cloud_code=request_timeout", captured.output[0])
+
+    async def test_stock_renewal_invalid_mapping_logs_only_validated_fields(self):
+        mapping = {
+            "runtimeId": "sensitive-invalid-id", "runtimeGeneration": 10 ** 100,
+            "attachmentGeneration": 8, "credential": "private-token",
+            "secretField": "private-generation",
+            "runtimeProfile": {"client": "codex"},
+        }
+
+        class FakeStore:
+            pass
+
+        class FakeCloud:
+            async def assigned_stock(self, _request):
+                raise AssertionError("invalid mapping must not reach cloud")
+
+        with self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(
+                FakeStore(), FakeCloud(), asyncio.Event(), mapping, set(),
+            )
+        self.assertIsNone(result)
+        self.assertEqual(len(captured.records), 1)
+        output = captured.output[0]
+        self.assertIn("invalid_mapping", output)
+        self.assertIn("runtime=unavailable", output)
+        self.assertIn("runtime_generation=unavailable", output)
+        self.assertIn("attachment_generation=8", output)
+        self.assertIn("cloud_code=none", output)
+        self.assertNotIn("sensitive-invalid-id", output)
+        self.assertNotIn("private-generation", output)
+        self.assertNotIn("private-token", output)
 
     async def test_stock_renewal_prunes_suspension_after_mapping_disappears(self):
         mapping = {

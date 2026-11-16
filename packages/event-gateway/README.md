@@ -308,7 +308,12 @@ and generation pair; it does not start, inspect, or reassign client sessions.
 Renewal stops for that exact mapping after a definitive refusal or mismatched
 response. An ambiguous transport result retries the same renewal with bounded
 backoff while the local lease remains live. This does not change global client
-configuration.
+configuration. A running daemon or connected MCP server does not prove that an
+assignment is still current. Renewal suspension, lease expiry, and exhausted
+transport retries produce diagnostic warnings without credentials or response
+bodies; they do not extend leases or change the refusal policy. Check the exact current lease before starting a client or enabling
+automatic turns. Claude tool discovery starts assignment registration in the
+background, so it is not evidence that registration succeeded.
 After an expired lease, an exact unresolved readback can be reconciled only by
 a complete same-pass owner listing that proves a live higher lease revision for
 the same association, holder, source, routing, and lifecycle. The old request
