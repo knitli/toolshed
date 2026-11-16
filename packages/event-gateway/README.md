@@ -446,7 +446,10 @@ Never place it in a shared or synced directory. Stop the daemon before upgrading
 unsupported database versions refuse to open. This release upgrades the journal
 to schema 6, which older Gateway versions cannot reopen; use fresh private state
 for qualification trials. Restart quarantines unfinished native attempts as
-ambiguous, preserving receipts and explicit recovery needs.
+ambiguous, preserving receipts and explicit recovery needs. The background
+reconciliation worker waits 30 seconds after a known retryable claim refusal,
+including transient conflicts and budget refusals; unknown outcomes stay
+reconcilable under the existing recovery rules.
 
 No service is installed or native client resumed on reboot. User-service
 installation and full owner enrollment remain qualification work after the
