@@ -2423,14 +2423,13 @@ class Store:
 
     def list_reconcilable(self):
         retry_reasons = (*RETRYABLE_CLAIM_REFUSALS, "over_budget")
-        placeholders = ",".join("?" for _ in retry_reasons)
         now = self.clock()
         retry_cutoff = now - CLAIM_RETRY_BACKOFF if math.isfinite(now) else float("-inf")
         return [
             self._public(row)
             for row in self.db.execute(
                 "SELECT * FROM deliveries WHERE NOT (state='claiming' "
-                f"AND COALESCE(reason,'') IN ({placeholders}) AND updated > ?) AND (state IN "
+                "AND COALESCE(reason,'') IN (?, ?, ?, ?, ?) AND updated > ?) AND (state IN "
                 "('claiming','admitted','settlement_pending','submitted','ambiguous') "
                 "OR (state='observed' AND ack_state IS NOT state) "
                 "OR (state='command_accepted' AND ack_state IS NOT state) "
