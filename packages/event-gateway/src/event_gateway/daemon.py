@@ -4,6 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -13,7 +14,7 @@ import stat
 import uuid
 
 from .client_runtime import _private_json, load_cloud_client
-from .cloud import CloudError, _json, _timestamp, _uuid
+from .cloud import CloudError, _ERRORS, _generation, _json, _timestamp, _uuid
 from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
@@ -25,6 +26,13 @@ BLOCKERS = ["native_client_binding_unavailable", "cloud_authority_not_integrated
 # CAS handoffs carry both the current and expected valid mappings; this bound is
 # separate from the signed HTTP protocol's 4096-byte envelope limit.
 _CONTROL_FRAME_BYTES = 8192
+logger = logging.getLogger(__name__)
+_STOCK_RENEWAL_CLOUD_CODES = frozenset(
+    code for codes in _ERRORS.values() for code in codes
+) | frozenset({
+    "credentials_unavailable", "invalid_configuration", "invalid_response",
+    "owner_interaction_required", "redirect_refused",
+})
 
 
 def status(store, dispatch=None):
@@ -273,6 +281,25 @@ async def _dispatch_worker(gateway, stop):
 async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa: MC0001
     """Renew one exact live assigned-stock mapping with bounded retries."""
     fingerprint = json.dumps(mapping, sort_keys=True, separators=(",", ":"))
+    runtime_id = mapping.get("runtimeId") if isinstance(mapping, dict) else None
+    runtime_id = runtime_id if _uuid(runtime_id) else "unavailable"
+    runtime_generation = mapping.get("runtimeGeneration") if isinstance(mapping, dict) else None
+    attachment_generation = mapping.get("attachmentGeneration") if isinstance(mapping, dict) else None
+    runtime_generation = (runtime_generation if _generation(runtime_generation)
+                          else "unavailable")
+    attachment_generation = (attachment_generation if _generation(attachment_generation)
+                             else "unavailable")
+
+    def log_failure(category, cloud_code="none"):
+        code = (cloud_code if cloud_code == "none"
+                or isinstance(cloud_code, str) and cloud_code in _STOCK_RENEWAL_CLOUD_CODES
+                else "other")
+        logger.warning(
+            "assigned-stock renewal %s runtime=%s runtime_generation=%s "
+            "attachment_generation=%s cloud_code=%s",
+            category, runtime_id, runtime_generation, attachment_generation, code,
+        )
+
     try:
         profile = mapping["runtimeProfile"]
         request = {
@@ -283,12 +310,14 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
         }
     except (KeyError, TypeError, ValueError):
         suspended.add(fingerprint)
+        log_failure("invalid_mapping")
         return
     for attempt in range(3):
         if stop.is_set():
             break
         request_started_at = store.clock()
         if mapping["leaseExpiresAt"] <= request_started_at:
+            log_failure("lease_expired_before_request")
             break
         try:
             # Expiry gates when a request may start, not how long its response
@@ -305,6 +334,7 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
                 raise
             if not renewed:
                 suspended.add(fingerprint)
+                log_failure("local_mapping_changed")
             else:
                 return True
             break
@@ -313,15 +343,20 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
                     error.code == "invalid_response" or error.definitive_refusal
                     or not error.ambiguous):
                 suspended.add(fingerprint)
+                log_failure("cloud_suspended", error.code)
                 break
             if attempt == 2:
+                cloud_code = error.code if isinstance(error, CloudError) else "request_timeout"
+                log_failure("ambiguous_retries_exhausted", cloud_code)
                 break
         except (KeyError, TypeError, ValueError):
             suspended.add(fingerprint)
+            log_failure("invalid_response")
             break
         delay = (1, 2)[attempt]
         remaining = mapping["leaseExpiresAt"] - store.clock()
         if remaining <= 0:
+            log_failure("lease_expired_during_retry")
             break
         try:
             await asyncio.wait_for(stop.wait(), min(delay, remaining))
