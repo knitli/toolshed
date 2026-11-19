@@ -242,6 +242,34 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.authority.settlements[0], self.authority.settlements[1])
         self.assertEqual(self.authority.acks, [])
 
+    async def test_reconcile_fenced_stock_claim_never_calls_authority_or_changes_records(self):
+        for client in ("codex", "claude"):
+            with self.subTest(client=client):
+                self.event = copy.deepcopy(EVENT)
+                self.event["runtimeId"] = str(uuid.uuid4())
+                self.event["runtimeProfile"]["client"] = client
+                self.event["deliveryId"] = derive_delivery_id(self.event)
+                mapping = {key: self.event[key] for key in IDENTITY}
+                mapping.update(consumerGeneration=self.event["consumerGeneration"],
+                               runtimeProfile=self.event["runtimeProfile"],
+                               leaseExpiresAt=self.now + 3600)
+                self.store.put_attachment(mapping)
+                delivery = self.accept()
+                self.assertTrue(self.store.begin_claim(delivery))
+                self.store.detach(self.event["runtimeId"])
+                self.restart()
+                attempt = self.store.current_attempt(delivery)
+                self.assertEqual((attempt["state"], attempt["fenced"], attempt["claim_uncertain"]),
+                                 ("claiming", 1, 0))
+                before = list(self.store.db.iterdump())
+                self.now += 1
+                row = await self.gateway.reconcile(delivery)
+                self.assertEqual((row["status"], row["reason"]), ("claiming", "claim_outcome_unknown"))
+                self.assertEqual(self.authority.claims, [])
+                self.assertEqual(self.authority.acks, [])
+                self.assertEqual(self.authority.settlements, [])
+                self.assertEqual(list(self.store.db.iterdump()), before)
+
     async def test_v2_definitive_claim_refusal_releases_capacity_and_expires(self):
         self.setup_messaging_v2_stock()
         self.store.max_rows = 1
@@ -810,28 +838,25 @@ class StockGatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.current_attempt(delivery)["state"], "submitting")
         self.assertEqual(self.authority.settlements, [])
 
-    async def test_expired_or_detached_persisted_claim_is_resolved_before_mapping_check(self):
-        for loss in ("expired", "detach"):
-            with self.subTest(loss=loss):
-                delivery = self.new_delivery()
-                self.assertTrue(self.store.begin_claim(delivery))
-                self.restart()
-                self.lose_assignment(loss)
-                claim_count = len(self.authority.claims)
-                settlement_count = len(self.authority.settlements)
-                with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
-                           new=self.stock_submit_mock()) as submit:
-                    result = await self.gateway.reconcile(delivery)
-                self.assertEqual(submit.await_count, 1)
-                self.assertEqual(len(self.authority.claims), claim_count + 1)
-                self.assertEqual(len(self.authority.settlements), settlement_count + 1)
-                self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
-                attempt = self.store.current_attempt(delivery)
-                self.assertEqual(attempt["state"], "settled")
-                self.assertEqual(attempt["settlement"]["status"], "not_started")
-                self.assertEqual(result["status"], "stale")
-                self.assertFalse(any(row["deliveryId"] == delivery for row in self.store.list_reconcilable()))
-                self.now = NOW
+    async def test_expired_persisted_claim_is_resolved_before_mapping_check(self):
+        delivery = self.new_delivery()
+        self.assertTrue(self.store.begin_claim(delivery))
+        self.restart()
+        self.lose_assignment("expired")
+        claim_count = len(self.authority.claims)
+        settlement_count = len(self.authority.settlements)
+        with patch("event_gateway.stock_codex.StockCodexAdapter.submit",
+                   new=self.stock_submit_mock()) as submit:
+            result = await self.gateway.reconcile(delivery)
+        self.assertEqual(submit.await_count, 1)
+        self.assertEqual(len(self.authority.claims), claim_count + 1)
+        self.assertEqual(len(self.authority.settlements), settlement_count + 1)
+        self.assertEqual(self.authority.settlements[-1][1], {"type": "local_not_submitted"})
+        attempt = self.store.current_attempt(delivery)
+        self.assertEqual(attempt["state"], "settled")
+        self.assertEqual(attempt["settlement"]["status"], "not_started")
+        self.assertEqual(result["status"], "stale")
+        self.assertFalse(any(row["deliveryId"] == delivery for row in self.store.list_reconcilable()))
 
     async def test_expired_or_detached_persisted_admission_settles_before_mapping_check(self):
         for loss in ("expired", "detach"):

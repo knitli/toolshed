@@ -669,6 +669,24 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
         self.assertEqual(len(self.submissions), 1)
 
+    async def test_reconcile_fenced_claim_never_calls_authority_or_changes_records(self):
+        ident = self.accept()['deliveryId']
+        self.assertTrue(self.store.begin_claim(ident))
+        self.store.detach(self.event['runtimeId'])
+        self.restart()
+        attempt = self.store.current_attempt(ident)
+        self.assertEqual((attempt['state'], attempt['fenced'], attempt['claim_uncertain']),
+                         ('claiming', 1, 0))
+        before = list(self.store.db.iterdump())
+        self.now += 1
+        row = await self.gateway.reconcile(ident)
+        self.assertEqual((row['status'], row['reason']), ('claiming', 'claim_outcome_unknown'))
+        self.assertEqual(self.claims, [])
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+        self.assertEqual(self.acknowledgments, [])
+        self.assertEqual(list(self.store.db.iterdump()), before)
+
     async def test_definitive_refusal_on_recovery_preserves_earlier_ambiguous_claim(self):
         ident = self.accept()['deliveryId']
         self.drop_claim = True

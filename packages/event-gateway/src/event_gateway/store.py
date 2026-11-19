@@ -1484,7 +1484,7 @@ class Store:
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
-            if row is None or row["state"] != "claiming":
+            if row is None or row["state"] != "claiming" or row["fenced"]:
                 raise StoreError("invalid_transition")
             self.db.execute("UPDATE attempts SET claim_uncertain=1, updated=? WHERE delivery_id=? AND attempt_id=?",
                             (self.clock(), delivery_id, attempt_id))

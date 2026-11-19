@@ -603,6 +603,26 @@ class StoreTests(unittest.TestCase):
         self.store = Store(self.path, clock=self.clock)
         self.assertEqual(self.store.current_attempt(ident), current)
 
+    def test_fenced_claim_request_preserves_all_records(self):
+        for uncertain in (False, True):
+            with self.subTest(uncertain=uncertain):
+                event = self.new_event()
+                event["runtimeId"] = str(uuid.uuid4())
+                event["deliveryId"] = derive_delivery_id(event)
+                ident, attempt = event["deliveryId"], event["attemptId"]
+                self.store.put_attachment(dict(self.mapping, runtimeId=event["runtimeId"]))
+                self.store.accept(event)
+                self.store.begin_claim(ident)
+                if uncertain:
+                    self.store.note_claim_request(ident, attempt)
+                self.store.detach(event["runtimeId"])
+                self.assertEqual(self.store.current_attempt(ident)["fenced"], 1)
+                before = list(self.store.db.iterdump())
+                self.now += 1
+                with self.assertRaisesRegex(StoreError, "^invalid_transition$"):
+                    self.store.note_claim_request(ident, attempt)
+                self.assertEqual(list(self.store.db.iterdump()), before)
+
     def test_legacy_claim_migration_defaults_to_uncertain(self):
         ident = self.store.accept(self.event)["deliveryId"]
         self.store.begin_claim(ident)
