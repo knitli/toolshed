@@ -802,6 +802,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_claim_distinguishes_definitive_refusals_from_uncertain_responses(self):
         cases = (
+            (408, {"error": "request_timeout"}, True),
             (400, {"error": "invalid_request"}, False),
             (403, {"error": "denied"}, False),
             (409, {"error": "expired"}, False),
@@ -820,6 +821,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
                 await self.client.claim(FIXTURE["original"])
             self.assertEqual(caught.exception.ambiguous, ambiguous)
             self.assertEqual(caught.exception.definitive_refusal, not ambiguous)
+            self.assertFalse(caught.exception.pre_send_timeout)
 
     async def test_definitive_claim_refusal_logs_only_status_and_allowlisted_code(self):
         self.status = 403
@@ -873,8 +875,10 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 cancelled.set()
         self.client._credentials = hangs
-        with self.assertRaisesRegex(CloudError, "^request_timeout$"):
+        with self.assertRaisesRegex(CloudError, "^request_timeout$") as caught:
             await self.client.claim(FIXTURE["original"])
+        self.assertFalse(caught.exception.ambiguous)
+        self.assertTrue(caught.exception.pre_send_timeout)
         self.assertTrue(cancelled.is_set())
         self.assertEqual(self.requests, [])
 
@@ -900,6 +904,7 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(CloudError, "^request_timeout$") as caught:
             await self.client.claim(FIXTURE["original"])
         self.assertFalse(caught.exception.ambiguous)
+        self.assertTrue(caught.exception.pre_send_timeout)
         self.assertEqual(self.requests, [])
 
     async def test_transport_cloud_error_is_sanitized(self):

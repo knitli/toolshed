@@ -339,15 +339,18 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
                 return True
             break
         except (CloudError, TimeoutError) as error:
+            pre_send_timeout = (isinstance(error, CloudError) and error.code == "request_timeout"
+                                and error.pre_send_timeout and not error.ambiguous)
             if isinstance(error, CloudError) and (
                     error.code == "invalid_response" or error.definitive_refusal
-                    or not error.ambiguous):
+                    or (not error.ambiguous and not pre_send_timeout)):
                 suspended.add(fingerprint)
                 log_failure("cloud_suspended", error.code)
                 break
             if attempt == 2:
                 cloud_code = error.code if isinstance(error, CloudError) else "request_timeout"
-                log_failure("ambiguous_retries_exhausted", cloud_code)
+                category = "pre_send_timeout_retries_exhausted" if pre_send_timeout else "ambiguous_retries_exhausted"
+                log_failure(category, cloud_code)
                 break
         except (KeyError, TypeError, ValueError):
             suspended.add(fingerprint)
