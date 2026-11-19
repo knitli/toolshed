@@ -1497,7 +1497,7 @@ class Store:
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
-            if row is None or row["state"] != "claiming":
+            if row is None or row["state"] != "claiming" or row["fenced"]:
                 raise StoreError("invalid_transition")
             self.db.execute("UPDATE attempts SET reason=?, claim_uncertain=?, updated=? WHERE delivery_id=? AND attempt_id=?",
                             (reason, int(uncertain), self.clock(), delivery_id, attempt_id))
@@ -1511,7 +1511,8 @@ class Store:
             self.db.execute("BEGIN IMMEDIATE")
             row = self._attempt(delivery_id, attempt_id)
             delivery = self.db.execute("SELECT * FROM deliveries WHERE id=?", (delivery_id,)).fetchone()
-            if (row is None or row["state"] != "claiming" or delivery["state"] != "claiming"
+            if (row is None or row["state"] != "claiming" or row["fenced"]
+                    or delivery["state"] != "claiming"
                     or delivery["submission"] is not None or delivery["turn"] is not None
                     or any(row[key] is not None for key in (
                         "admission", "native_request", "evidence", "started_receipt", "input_recorded_receipt"))):
