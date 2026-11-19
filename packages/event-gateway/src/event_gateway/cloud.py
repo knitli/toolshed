@@ -24,16 +24,18 @@ from .protocol import (
 )
 
 logger = logging.getLogger(__name__)
+POST_TIMEOUT_SECONDS = 5
 
 
 class CloudError(ValueError):
     """Only fixed local/server codes escape the credential boundary."""
 
-    def __init__(self, code, *, ambiguous=False, definitive_refusal=False):
+    def __init__(self, code, *, ambiguous=False, definitive_refusal=False, pre_send_timeout=False):
         """Store the error code."""
         self.code = code
         self.ambiguous = ambiguous
         self.definitive_refusal = definitive_refusal
+        self.pre_send_timeout = pre_send_timeout
         super().__init__(code)
 
 
@@ -1112,9 +1114,11 @@ class CloudClient:
         try:
             credential = await self._credentials()
         except TimeoutError:
-            raise CloudError("request_timeout") from None
+            raise CloudError("request_timeout", pre_send_timeout=True) from None
         except CloudError as error:
-            raise CloudError("request_timeout" if error.code == "credentials_timeout" else "unavailable") from None
+            if error.code == "credentials_timeout":
+                raise CloudError("request_timeout", pre_send_timeout=True) from None
+            raise CloudError("unavailable") from None
         except Exception:
             raise CloudError("unavailable") from None
         if not _valid_credentials(credential, self.auth_mode):
@@ -1180,7 +1184,7 @@ class CloudClient:
     async def _post(self, path, value, *, node_proof=True, encoded_body=None, before_send=None):
         send_started = False
         try:
-            async with asyncio.timeout(5):
+            async with asyncio.timeout(POST_TIMEOUT_SECONDS):
                 body = encoded_body if encoded_body is not None else _json(value)
                 if len(body) > 4096:
                     raise CloudError("invalid_request")
@@ -1194,7 +1198,7 @@ class CloudClient:
             raise
         except TimeoutError:
             code = "request_timeout"
-            raise CloudError(code, ambiguous=send_started) from None
+            raise CloudError(code, ambiguous=send_started, pre_send_timeout=not send_started) from None
         except Exception:
             # Provider/transport errors can quote credentials: never propagate them.
             raise CloudError("unavailable", ambiguous=send_started) from None

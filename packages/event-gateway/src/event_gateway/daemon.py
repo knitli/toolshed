@@ -14,7 +14,7 @@ import stat
 import uuid
 
 from .client_runtime import _private_json, load_cloud_client
-from .cloud import CloudError, _ERRORS, _generation, _json, _timestamp, _uuid
+from .cloud import CloudError, POST_TIMEOUT_SECONDS, _ERRORS, _generation, _json, _timestamp, _uuid
 from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
@@ -322,7 +322,8 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
         try:
             # Expiry gates when a request may start, not how long its response
             # may take: cloud renewal can commit before expiry and reply after it.
-            async with asyncio.timeout(5):
+            # Let the cloud client's deadline classify the timeout before this watchdog fires.
+            async with asyncio.timeout(POST_TIMEOUT_SECONDS + 1):
                 response = await cloud.assigned_stock(request)
             # shortcut: Keep the thread-bound Store on its owner loop until DB access is serialized.
             lease_expires_at = _timestamp(response["leaseUntil"]) / 1000
@@ -339,15 +340,18 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
                 return True
             break
         except (CloudError, TimeoutError) as error:
+            pre_send_timeout = (isinstance(error, CloudError) and error.code == "request_timeout"
+                                and error.pre_send_timeout and not error.ambiguous)
             if isinstance(error, CloudError) and (
                     error.code == "invalid_response" or error.definitive_refusal
-                    or not error.ambiguous):
+                    or (not error.ambiguous and not pre_send_timeout)):
                 suspended.add(fingerprint)
                 log_failure("cloud_suspended", error.code)
                 break
             if attempt == 2:
                 cloud_code = error.code if isinstance(error, CloudError) else "request_timeout"
-                log_failure("ambiguous_retries_exhausted", cloud_code)
+                category = "pre_send_timeout_retries_exhausted" if pre_send_timeout else "ambiguous_retries_exhausted"
+                log_failure(category, cloud_code)
                 break
         except (KeyError, TypeError, ValueError):
             suspended.add(fingerprint)
