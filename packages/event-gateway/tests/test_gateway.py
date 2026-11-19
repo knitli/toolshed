@@ -669,6 +669,52 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.gateway.dispatch(ident))['status'], 'submitted')
         self.assertEqual(len(self.submissions), 1)
 
+    async def test_reconcile_fenced_claim_never_calls_authority_or_changes_records(self):
+        ident = self.accept()['deliveryId']
+        self.assertTrue(self.store.begin_claim(ident))
+        self.store.detach(self.event['runtimeId'])
+        self.restart()
+        attempt = self.store.current_attempt(ident)
+        self.assertEqual((attempt['state'], attempt['fenced'], attempt['claim_uncertain']),
+                         ('claiming', 1, 0))
+        before = list(self.store.db.iterdump())
+        self.now += 1
+        row = await self.gateway.reconcile(ident)
+        self.assertEqual((row['status'], row['reason']), ('claiming', 'claim_outcome_unknown'))
+        self.assertEqual(self.claims, [])
+        self.assertEqual(self.submissions, [])
+        self.assertEqual(self.settlements, [])
+        self.assertEqual(self.acknowledgments, [])
+        self.assertEqual(list(self.store.db.iterdump()), before)
+
+    async def test_detach_during_claim_preserves_fence_when_refusal_arrives(self):
+        for response in ('over_budget', 'capacity', 'denied'):
+            with self.subTest(response=response):
+                ident, runtime = self.fresh_runtime_delivery()
+                before = None
+
+                async def detach_then_refuse(envelope):
+                    nonlocal before
+                    self.assertEqual(envelope['deliveryId'], ident)
+                    self.store.detach(runtime)
+                    attempt = self.store.current_attempt(ident)
+                    self.assertEqual((attempt['fenced'], attempt['claim_uncertain']), (1, 1))
+                    before = list(self.store.db.iterdump())
+                    self.now += 1
+                    if response == 'over_budget':
+                        return copy.deepcopy(CLOUD_FIXTURES['overBudget'])
+                    raise CloudError(response, definitive_refusal=True)
+
+                with patch.object(self, 'claim', side_effect=detach_then_refuse) as claim:
+                    row = await self.gateway.dispatch(ident)
+                self.assertEqual(claim.await_count, 1)
+                self.assertIsNotNone(before)
+                self.assertEqual((row['status'], row['reason']), ('claiming', 'claim_outcome_unknown'))
+                self.assertEqual(list(self.store.db.iterdump()), before)
+                self.assertEqual(self.submissions, [])
+                self.assertEqual(self.settlements, [])
+                self.assertEqual(self.acknowledgments, [])
+
     async def test_definitive_refusal_on_recovery_preserves_earlier_ambiguous_claim(self):
         ident = self.accept()['deliveryId']
         self.drop_claim = True
