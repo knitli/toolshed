@@ -364,7 +364,7 @@ class DaemonWireTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(daemon.asyncio, "timeout", FakeTimeout):
             await daemon._stock_renewal_worker(store, FakeCloud(), stop)
 
-        self.assertEqual(timeout_values, [5])
+        self.assertEqual(timeout_values, [6])
         self.assertEqual(store.renewed, 200)
 
     async def test_stock_renewal_retries_local_cas_after_old_lease_expires(self):
