@@ -16,7 +16,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from event_gateway import cli
+from event_gateway import cli, daemon
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -881,6 +881,41 @@ class CloudTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(caught.exception.pre_send_timeout)
         self.assertTrue(cancelled.is_set())
         self.assertEqual(self.requests, [])
+
+    async def test_stock_renewal_classifies_hung_credentials_before_daemon_timeout(self):
+        async def hangs():
+            self.credential_calls += 1
+            await asyncio.Event().wait()
+
+        class Store:
+            @staticmethod
+            def clock():
+                return NOW
+
+        mapping = {
+            "runtimeId": str(uuid.uuid4()), "runtimeGeneration": 4,
+            "attachmentGeneration": 7, "leaseExpiresAt": NOW + 90,
+            "runtimeProfile": {"client": "codex", "conversationId": str(uuid.uuid4())},
+        }
+        self.client._credentials = hangs
+        suspended = set()
+        real_timeout = asyncio.timeout
+
+        async def no_backoff(awaitable, _timeout):
+            awaitable.close()
+            raise TimeoutError
+
+        with patch.object(asyncio, "timeout", side_effect=lambda seconds: real_timeout(seconds / 25)), \
+                patch.object(asyncio, "wait_for", side_effect=no_backoff), \
+                self.assertLogs(daemon.logger, level="WARNING") as captured:
+            result = await daemon._renew_stock_mapping(Store(), self.client, asyncio.Event(), mapping, suspended)
+
+        self.assertIsNone(result)
+        self.assertEqual(self.credential_calls, 3)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(suspended, set())
+        self.assertIn("pre_send_timeout_retries_exhausted", captured.output[0])
+        self.assertIn("cloud_code=request_timeout", captured.output[0])
 
     async def test_credential_cloud_error_is_sanitized(self):
         async def fails():

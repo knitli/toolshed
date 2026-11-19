@@ -24,6 +24,7 @@ from .protocol import (
 )
 
 logger = logging.getLogger(__name__)
+POST_TIMEOUT_SECONDS = 5
 
 
 class CloudError(ValueError):
@@ -1183,7 +1184,7 @@ class CloudClient:
     async def _post(self, path, value, *, node_proof=True, encoded_body=None, before_send=None):
         send_started = False
         try:
-            async with asyncio.timeout(5):
+            async with asyncio.timeout(POST_TIMEOUT_SECONDS):
                 body = encoded_body if encoded_body is not None else _json(value)
                 if len(body) > 4096:
                     raise CloudError("invalid_request")

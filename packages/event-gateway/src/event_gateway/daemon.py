@@ -14,7 +14,7 @@ import stat
 import uuid
 
 from .client_runtime import _private_json, load_cloud_client
-from .cloud import CloudError, _ERRORS, _generation, _json, _timestamp, _uuid
+from .cloud import CloudError, POST_TIMEOUT_SECONDS, _ERRORS, _generation, _json, _timestamp, _uuid
 from .gateway import Gateway
 from .listener import Listener
 from .native import NativeBridgeAdapter, SessionNativeBridge
@@ -322,7 +322,8 @@ async def _renew_stock_mapping(store, cloud, stop, mapping, suspended):  # noqa:
         try:
             # Expiry gates when a request may start, not how long its response
             # may take: cloud renewal can commit before expiry and reply after it.
-            async with asyncio.timeout(5):
+            # Let the cloud client's deadline classify the timeout before this watchdog fires.
+            async with asyncio.timeout(POST_TIMEOUT_SECONDS + 1):
                 response = await cloud.assigned_stock(request)
             # shortcut: Keep the thread-bound Store on its owner loop until DB access is serialized.
             lease_expires_at = _timestamp(response["leaseUntil"]) / 1000
